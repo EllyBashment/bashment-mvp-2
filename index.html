@@ -262,12 +262,27 @@ function initMap() {
   map = new mapboxgl.Map({
     container: 'realMap',
     style: 'mapbox://styles/mapbox/dark-v11',
-    center: [-76.79, 17.98], // Kingston, Jamaica
-    zoom: 9,
-    minZoom: 7,
-    maxBounds: [[-79.0, 16.8], [-75.5, 19.0]] // locked to Jamaica for the beta
+    center: [-73.95, 40.72], // NYC default — fallback while detecting location
+    zoom: 10,
+    minZoom: 3,
+    maxBounds: [[-82.0, 15.5], [-69.0, 42.5]] // wide enough to cover both Jamaica and NYC metro (beta regions)
   });
   map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const { longitude: lng, latitude: lat } = pos.coords;
+        if (withinBbox(lng, lat, JAMAICA_BBOX)) {
+          map.flyTo({ center: [lng, lat], zoom: 9.5 }); // Jamaica is compact — this shows most of the island
+        } else if (withinBbox(lng, lat, NYC_METRO_BBOX)) {
+          map.flyTo({ center: [lng, lat], zoom: 10.5 }); // borough-level detail
+        }
+        // If they're testing from somewhere outside both regions, keep the NYC default rather than centering on their real (irrelevant) location
+      },
+      err => { /* permission denied or unavailable — keep the NYC default */ }
+    );
+  }
 }
 
 function setMapMode(mode) {
@@ -421,7 +436,7 @@ function openSheet(type) {
       <div style="text-align:center;margin:14px 0;color:var(--dim);font-size:10px;">— OR —</div>
       <div class="field"><label>Event Title *</label><input id="ev-title" placeholder="e.g. D'Frenchiation"/></div>
       <div class="field"><label>Venue Name *</label><input id="ev-venue" placeholder="e.g. Pollyanna Caterers"/></div>
-      <div class="field"><label>Address in Jamaica (for the map) *</label><input id="ev-address" placeholder="e.g. 8 Stanton Terrace, Kingston"/></div>
+      <div class="field"><label>Address in Jamaica or NYC Metro (for the map) *</label><input id="ev-address" placeholder="e.g. 8 Stanton Terrace, Kingston or 123 Main St, Brooklyn"/></div>
       <div class="field"><label>Genres</label><input id="ev-genres" placeholder="e.g. Afrobeats, Dancehall"/></div>
       <div class="field"><label>Vibe Score (starting estimate)</label><input id="ev-vibe" type="number" min="0" max="100" placeholder="e.g. 70"/></div>
       <button class="btn primary" id="createEventBtn" onclick="submitNewEvent()">Create Event</button>
@@ -496,13 +511,34 @@ function fileToBase64(file) {
   });
 }
 
-async function geocodeAddress(address) {
-  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&country=jm&limit=1`;
+// Bounding boxes used to confirm a geocoded result actually falls within an allowed beta region
+const JAMAICA_BBOX = { minLng: -79.0, minLat: 16.8, maxLng: -75.5, maxLat: 19.0 };
+const NYC_METRO_BBOX = { minLng: -74.3, minLat: 40.45, maxLng: -71.75, maxLat: 41.35 }; // 5 boroughs + Long Island
+
+function withinBbox(lng, lat, box) {
+  return lng >= box.minLng && lng <= box.maxLng && lat >= box.minLat && lat <= box.maxLat;
+}
+
+async function geocodeInRegion(address, countryCode, bbox) {
+  const bboxParam = `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&country=${countryCode}&bbox=${bboxParam}&limit=1`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.features && data.features[0]) {
-    return { lng: data.features[0].center[0], lat: data.features[0].center[1] };
+    const [lng, lat] = data.features[0].center;
+    if (withinBbox(lng, lat, bbox)) return { lng, lat };
   }
+  return null;
+}
+
+async function geocodeAddress(address) {
+  // Try Jamaica first, then NYC metro — this is what actually restricts the beta to these two regions
+  const jamaicaResult = await geocodeInRegion(address, 'jm', JAMAICA_BBOX);
+  if (jamaicaResult) return jamaicaResult;
+
+  const nycResult = await geocodeInRegion(address, 'us', NYC_METRO_BBOX);
+  if (nycResult) return nycResult;
+
   return null;
 }
 
@@ -540,7 +576,7 @@ async function submitNewEvent() {
       toast('Could not reach the map service: ' + (geoErr.message || 'unknown error'));
       return;
     }
-    if (!coords) { toast('Could not find that address in Jamaica — try adding the parish or a landmark'); return; }
+    if (!coords) { toast('Could not find that address — Bashment beta currently covers Jamaica and NYC metro (5 boroughs + Long Island) only'); return; }
 
     toast('Saving event…');
     let insertResult;
