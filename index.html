@@ -353,9 +353,14 @@ function renderDashboard() {
   const recentEl = document.getElementById('dashRecentContent');
   if (!myOwnEvents.length) {
     recentEl.innerHTML = `<div class="sub">No events yet — create your first one to see it here.</div>`;
+    document.getElementById('dashRecentCard').style.cursor = 'default';
+    document.getElementById('dashRecentCard').onclick = null;
     return;
   }
   const ev = myOwnEvents[0];
+  window.dashRecentEventRef = ev; // safe reference for the card click handler
+  document.getElementById('dashRecentCard').style.cursor = 'pointer';
+  document.getElementById('dashRecentCard').onclick = () => openEventDetail(window.dashRecentEventRef);
   recentEl.innerHTML = `
     <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
     <div class="sub" style="margin:2px 0 8px;">${escapeHtml(ev.venue_name)}</div>
@@ -394,8 +399,9 @@ function renderEventsList() {
     body.innerHTML = `<div class="sub" style="text-align:center;padding:40px 0;">No events yet.<br/><br/><button class="btn primary" style="width:auto;padding:12px 24px;" onclick="openSheet('create')">Create your first event</button></div>`;
     return;
   }
-  body.innerHTML = mine.map(ev => `
-    <div class="card" style="margin-bottom:10px;">
+  window.myEventsListRefs = mine; // safe indexed lookup for the card click handlers below
+  body.innerHTML = mine.map((ev, idx) => `
+    <div class="card" style="margin-bottom:10px;cursor:pointer;" onclick="openEventDetail(window.myEventsListRefs[${idx}])">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
           <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}${ev.is_private ? ' <span class="pill" style="margin-left:4px;">Private</span>' : ''}</div>
@@ -430,6 +436,7 @@ function openEventDetail(ev) {
       <div class="metricline"><span>Genres</span><b>${escapeHtml(ev.genres || '—')}</b></div>
       <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
     </div>
+    ${ev.lat && ev.lng ? `<button class="btn outline" style="margin-top:10px;" onclick="openDirections()">Get Directions</button>` : ''}
     ${isOwner ? `<button class="btn primary" style="margin-top:12px;" onclick="publishEvent('${ev.id}')">${ev.status === 'published' ? 'Mark as Live' : 'Publish Event'}</button>` : ''}
     ${isOwner ? `
     <div style="display:flex;gap:6px;margin-top:8px;">
@@ -679,6 +686,80 @@ async function shareEvent(id) {
   } catch (e) {
     toast('Share link: ' + shareUrl);
   }
+}
+
+// ── DIRECTIONS ──────────────────────────────────────────────
+async function openDirections() {
+  const ev = window.currentDetailEvent;
+  if (!ev || !ev.lat || !ev.lng) return;
+
+  document.getElementById('sheetContent').innerHTML = `
+    <div class="eyebrow">Directions</div>
+    <div class="h1" style="font-size:20px">${escapeHtml(ev.venue_name)}</div>
+    <p class="sub" style="margin-top:4px;">${escapeHtml(ev.address || '')}</p>
+    <div id="directionsBody" style="margin-top:14px;">
+      <div class="sub" style="text-align:center;padding:20px 0;">Finding your location…</div>
+    </div>
+  `;
+  document.getElementById('sheet').classList.add('show');
+
+  if (!navigator.geolocation) {
+    renderDirectionsFallback(ev, 'Location isn\'t available on this device.');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async pos => {
+      const originLat = pos.coords.latitude, originLng = pos.coords.longitude;
+      try {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${originLng},${originLat};${ev.lng},${ev.lat}?access_token=${mapboxgl.accessToken}&overview=simplified`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const route = data.routes && data.routes[0];
+
+        if (!route) { renderDirectionsFallback(ev, 'Could not calculate a route.'); return; }
+
+        const durationMin = Math.round(route.duration / 60);
+        const distanceKm = (route.distance / 1000).toFixed(1);
+
+        document.getElementById('directionsBody').innerHTML = `
+          <div class="grid2">
+            <div class="stat"><b class="gold">${durationMin}</b><span>Minutes</span></div>
+            <div class="stat"><b>${distanceKm}</b><span>Kilometers</span></div>
+          </div>
+          <button class="btn primary" style="margin-top:14px;" onclick="openInNativeMaps(${originLat},${originLng},${ev.lat},${ev.lng},'${escapeHtml(ev.venue_name).replace(/'/g,"\\'")}')">Start Navigation</button>
+          <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
+        `;
+      } catch (e) {
+        renderDirectionsFallback(ev, 'Could not calculate a route right now.');
+      }
+    },
+    () => { renderDirectionsFallback(ev, 'Location access was denied — you can still get directions below.'); }
+  );
+}
+
+function renderDirectionsFallback(ev, message) {
+  document.getElementById('directionsBody').innerHTML = `
+    <p class="sub" style="text-align:center;padding:8px 0 16px;">${escapeHtml(message)}</p>
+    <button class="btn primary" onclick="openInNativeMaps(null,null,${ev.lat},${ev.lng},'${escapeHtml(ev.venue_name).replace(/'/g,"\\'")}')">Open in Maps</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
+  `;
+}
+
+function openInNativeMaps(originLat, originLng, destLat, destLng, label) {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const destParam = `${destLat},${destLng}`;
+  let url;
+  if (isIOS) {
+    url = originLat != null
+      ? `https://maps.apple.com/?saddr=${originLat},${originLng}&daddr=${destParam}&dirflg=d`
+      : `https://maps.apple.com/?daddr=${destParam}&dirflg=d&q=${encodeURIComponent(label)}`;
+  } else {
+    url = originLat != null
+      ? `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destParam}&travelmode=driving`
+      : `https://www.google.com/maps/dir/?api=1&destination=${destParam}&travelmode=driving`;
+  }
+  window.open(url, '_blank');
 }
 
 // ── CREATE EVENT ────────────────────────────────────────────
@@ -983,6 +1064,8 @@ async function loadPublicEvent(eventId) {
     return;
   }
 
+  window.currentDetailEvent = ev; // so openDirections() works the same way here as in the app
+
   body.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;">
       <div class="logo" style="font-size:28px;">Bash<span>ment</span></div>
@@ -996,6 +1079,7 @@ async function loadPublicEvent(eventId) {
       <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
       ${ev.is_live ? `<div class="metricline"><span>Status</span><b class="red">LIVE NOW</b></div>` : ''}
     </div>
+    ${ev.lat && ev.lng ? `<button class="btn outline" style="margin-top:14px;" onclick="openDirections()">Get Directions</button>` : ''}
     <div class="notice" style="margin-top:16px;text-align:center;">Posted on Bashment — the operating system for nightlife promoters in Jamaica and NYC.</div>
     <button class="btn primary" style="margin-top:14px;" onclick="go('entry')">Explore More on Bashment</button>
   `;
