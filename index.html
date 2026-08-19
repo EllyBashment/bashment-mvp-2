@@ -432,10 +432,22 @@ function openEventDetail(ev) {
 function openEditEvent() {
   const ev = window.currentDetailEvent;
   if (!ev) return;
+  window.editFlyerUrl = ev.flyer_url || null; // tracks the flyer to save — starts as the existing one
   document.getElementById('sheetContent').innerHTML = `
     <div class="eyebrow">Edit Event</div>
     <div class="h1" style="font-size:20px">${escapeHtml(ev.title)}</div>
-    <div class="field" style="margin-top:12px;"><label>Event Title *</label><input id="edit-title" value="${escapeHtml(ev.title)}"/></div>
+    <div class="field" style="margin-top:12px;">
+      <label>Flyer</label>
+      <div id="editFlyerPreview">
+        ${ev.flyer_url ? `<div style="border-radius:14px;overflow:hidden;border:1px solid rgba(245,166,35,.2);margin-bottom:8px;"><img src="${escapeHtml(ev.flyer_url)}" style="width:100%;display:block;" alt="Current flyer"/></div>` : '<div class="sub" style="margin-bottom:8px;">No flyer attached yet.</div>'}
+      </div>
+      <div class="drop" onclick="document.getElementById('editFlyerInput').click()">
+        <div style="font-size:22px;">＋</div><b>${ev.flyer_url ? 'Replace Flyer' : 'Add Flyer'}</b>
+        <input id="editFlyerInput" type="file" accept=".jpg,.jpeg,.png" class="hidden" onchange="handleEditFlyerUpload(this)"/>
+      </div>
+      <div id="editFlyerStatus"></div>
+    </div>
+    <div class="field"><label>Event Title *</label><input id="edit-title" value="${escapeHtml(ev.title)}"/></div>
     <div class="field"><label>Venue Name *</label><input id="edit-venue" value="${escapeHtml(ev.venue_name)}"/></div>
     <div class="field"><label>Address in Jamaica or NYC Metro (for the map) *</label><input id="edit-address" value="${escapeHtml(ev.address || '')}"/></div>
     <div class="field"><label>Genres</label><input id="edit-genres" value="${escapeHtml(ev.genres || '')}"/></div>
@@ -444,6 +456,28 @@ function openEditEvent() {
     <button class="btn primary" id="saveEditBtn" onclick="saveEditedEvent()">Save Changes</button>
     <button class="btn outline" style="margin-top:8px;" onclick="openEventDetail(window.currentDetailEvent)">Cancel</button>
   `;
+}
+
+async function handleEditFlyerUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusArea = document.getElementById('editFlyerStatus');
+  statusArea.innerHTML = `<div class="flyer-status">Uploading flyer…</div>`;
+  try {
+    const ext = file.name.split('.').pop();
+    const path = `${currentUser.id}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await sb.storage.from('flyers').upload(path, file);
+    if (uploadError) {
+      statusArea.innerHTML = `<div class="flyer-status">Couldn't upload — try again.</div>`;
+      return;
+    }
+    const { data: urlData } = sb.storage.from('flyers').getPublicUrl(path);
+    window.editFlyerUrl = urlData.publicUrl;
+    document.getElementById('editFlyerPreview').innerHTML = `<div style="border-radius:14px;overflow:hidden;border:1px solid rgba(245,166,35,.2);margin-bottom:8px;"><img src="${urlData.publicUrl}" style="width:100%;display:block;" alt="New flyer"/></div>`;
+    statusArea.innerHTML = `<div class="flyer-status">✓ Flyer uploaded — will be saved when you tap Save Changes.</div>`;
+  } catch (e) {
+    statusArea.innerHTML = `<div class="flyer-status">Unexpected error uploading the flyer.</div>`;
+  }
 }
 
 async function saveEditedEvent() {
@@ -487,7 +521,8 @@ async function saveEditedEvent() {
 
     const { error } = await sb.from('events').update({
       title, venue_name: venue, address, lat, lng,
-      genres, vibe_score: vibe, starts_at: eventDate
+      genres, vibe_score: vibe, starts_at: eventDate,
+      flyer_url: window.editFlyerUrl
     }).eq('id', ev.id);
 
     if (error) { toast('Could not save changes: ' + error.message); return; }
