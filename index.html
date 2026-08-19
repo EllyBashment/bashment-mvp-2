@@ -83,6 +83,14 @@ button,input,select,textarea{font:inherit}
 <body>
 <div class="shell"><div class="device"><div class="notch"></div>
 
+<!-- PUBLIC EVENT VIEW (no sign-in required — shared links land here) -->
+<section class="screen neutral" id="publicEvent">
+  <div class="status"><span>9:41</span><span>●●●</span></div>
+  <div class="body" style="padding:24px 20px;" id="publicEventBody">
+    <div class="sub" style="text-align:center;padding:40px 0;">Loading event…</div>
+  </div>
+</section>
+
 <!-- ENTRY -->
 <section class="screen active neutral" id="entry">
   <div class="status"><span>9:41</span><span>●●●</span></div>
@@ -319,8 +327,9 @@ async function loadEvents() {
   if (mapMode === 'mine') {
     mapEvents = myOwnEvents;
   } else {
+    // is_private events must NEVER appear in public browsing — only reachable via their direct share link
     const { data: pubData, error: pubError } = await sb.from('events')
-      .select('*').eq('status', 'published').order('created_at', { ascending: false });
+      .select('*').eq('status', 'published').eq('is_private', false).order('created_at', { ascending: false });
     mapEvents = pubError ? [] : (pubData || []);
   }
 
@@ -389,7 +398,7 @@ function renderEventsList() {
     <div class="card" style="margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
+          <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}${ev.is_private ? ' <span class="pill" style="margin-left:4px;">Private</span>' : ''}</div>
           <div class="sub" style="margin-top:2px;">${escapeHtml(ev.venue_name)}</div>
         </div>
         ${ev.is_live ? '<span class="pill livepill">LIVE</span>' : `<span class="pill">${escapeHtml(ev.status)}</span>`}
@@ -416,11 +425,13 @@ function openEventDetail(ev) {
     </div>
     <div class="card" style="margin-top:10px;">
       <div class="metricline"><span>Status</span><b>${escapeHtml(ev.status)}</b></div>
+      <div class="metricline"><span>Visibility</span><b style="color:${ev.is_private ? 'var(--gold)' : 'inherit'};">${ev.is_private ? 'Private — link only' : 'Public'}</b></div>
       <div class="metricline"><span>Date</span><b>${ev.starts_at ? new Date(ev.starts_at).toLocaleDateString() : '—'}</b></div>
       <div class="metricline"><span>Genres</span><b>${escapeHtml(ev.genres || '—')}</b></div>
       <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
     </div>
     ${isOwner ? `<button class="btn primary" style="margin-top:12px;" onclick="publishEvent('${ev.id}')">${ev.status === 'published' ? 'Mark as Live' : 'Publish Event'}</button>` : ''}
+    ${isOwner && ev.status === 'published' ? `<button class="btn outline" style="margin-top:8px;" onclick="shareEvent('${ev.id}')">Share Event Link</button>` : ''}
     ${isOwner ? `<button class="btn outline" style="margin-top:8px;" onclick="openEditEvent()">Edit Event</button>` : ''}
     ${isOwner ? `<button class="btn outline" style="margin-top:8px;color:#ff6b55;border-color:rgba(255,59,31,.3);" onclick="confirmDeleteEvent()">Delete Event</button>` : ''}
     <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
@@ -453,6 +464,13 @@ function openEditEvent() {
     <div class="field"><label>Genres</label><input id="edit-genres" value="${escapeHtml(ev.genres || '')}"/></div>
     <div class="field"><label>Event Date *</label><input id="edit-date" type="date" value="${ev.starts_at ? new Date(ev.starts_at).toISOString().split('T')[0] : ''}"/></div>
     <div class="field"><label>Vibe Score</label><input id="edit-vibe" type="number" min="0" max="100" value="${ev.vibe_score ?? 70}"/></div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="edit-private" ${ev.is_private ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--gold);"/>
+        Private Event — only visible to people with the share link
+      </label>
+      <div class="sub" style="margin-top:4px;">Hidden from the public map and Explore. Good for events that need extra discretion.</div>
+    </div>
     <button class="btn primary" id="saveEditBtn" onclick="saveEditedEvent()">Save Changes</button>
     <button class="btn outline" style="margin-top:8px;" onclick="openEventDetail(window.currentDetailEvent)">Cancel</button>
   `;
@@ -522,6 +540,7 @@ async function saveEditedEvent() {
     const { error } = await sb.from('events').update({
       title, venue_name: venue, address, lat, lng,
       genres, vibe_score: vibe, starts_at: eventDate,
+      is_private: document.getElementById('edit-private').checked,
       flyer_url: window.editFlyerUrl
     }).eq('id', ev.id);
 
@@ -572,6 +591,25 @@ async function publishEvent(id) {
   closeSheet();
   toast('Event updated');
   loadEvents();
+}
+
+async function shareEvent(id) {
+  const ev = window.currentDetailEvent;
+  const shareUrl = `${window.location.origin}${window.location.pathname}?event=${id}`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: ev ? ev.title : 'Bashment Event', text: 'Check out this event on Bashment', url: shareUrl });
+      return;
+    } catch (e) { /* user cancelled the share sheet — fall through to clipboard as a backup */ }
+  }
+
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    toast('Link copied — paste it anywhere');
+  } catch (e) {
+    toast('Share link: ' + shareUrl);
+  }
 }
 
 // ── CREATE EVENT ────────────────────────────────────────────
@@ -674,6 +712,13 @@ function openSheet(type) {
       <div class="field"><label>Genres</label><input id="ev-genres" placeholder="e.g. Afrobeats, Dancehall"/></div>
       <div class="field"><label>Event Date *</label><input id="ev-date" type="date"/></div>
       <div class="field"><label>Vibe Score (starting estimate)</label><input id="ev-vibe" type="number" min="0" max="100" placeholder="e.g. 70"/></div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="ev-private" style="width:16px;height:16px;accent-color:var(--gold);"/>
+          Private Event — only visible to people with the share link
+        </label>
+        <div class="sub" style="margin-top:4px;">Hidden from the public map and Explore. Good for events that need extra discretion.</div>
+      </div>
       <button class="btn primary" id="createEventBtn" onclick="submitNewEvent()">Create Event</button>
     `;
   }
@@ -825,6 +870,7 @@ async function submitNewEvent() {
         lat: coords.lat, lng: coords.lng,
         genres, vibe_score: vibe,
         starts_at: eventDate,
+        is_private: document.getElementById('ev-private').checked,
         flyer_url: window.pendingFlyerUrl || null,
         status: 'draft'
       });
@@ -851,7 +897,52 @@ async function submitNewEvent() {
 
 document.getElementById('sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
-initAuth();
+// ── PUBLIC SHARED EVENT LINK ────────────────────────────────
+async function loadPublicEvent(eventId) {
+  go('publicEvent');
+  const body = document.getElementById('publicEventBody');
+  const { data: ev, error } = await sb.from('events').select('*').eq('id', eventId).eq('status', 'published').maybeSingle();
+
+  if (error || !ev) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:20px 0;">
+        <div class="logo" style="font-size:32px;">Bash<span>ment</span></div>
+        <p class="sub" style="margin-top:16px;">This event isn't available — it may have been removed or isn't published yet.</p>
+        <button class="btn primary" style="margin-top:16px;" onclick="go('entry')">Go to Bashment</button>
+      </div>
+    `;
+    return;
+  }
+
+  body.innerHTML = `
+    <div style="text-align:center;margin-bottom:16px;">
+      <div class="logo" style="font-size:28px;">Bash<span>ment</span></div>
+    </div>
+    ${ev.flyer_url ? `<div style="border-radius:16px;overflow:hidden;border:1px solid rgba(245,166,35,.2);margin-bottom:14px;"><img src="${escapeHtml(ev.flyer_url)}" style="width:100%;display:block;" alt="Event flyer"/></div>` : ''}
+    <div class="h1" style="font-size:22px;">${escapeHtml(ev.title)}</div>
+    <p class="sub" style="margin:6px 0 14px;">${escapeHtml(ev.venue_name)}</p>
+    <div class="card">
+      <div class="metricline"><span>Date</span><b>${ev.starts_at ? new Date(ev.starts_at).toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' }) : 'TBA'}</b></div>
+      <div class="metricline"><span>Genres</span><b>${escapeHtml(ev.genres || '—')}</b></div>
+      <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
+      ${ev.is_live ? `<div class="metricline"><span>Status</span><b class="red">LIVE NOW</b></div>` : ''}
+    </div>
+    <div class="notice" style="margin-top:16px;text-align:center;">Posted on Bashment — the operating system for nightlife promoters in Jamaica and NYC.</div>
+    <button class="btn primary" style="margin-top:14px;" onclick="go('entry')">Explore More on Bashment</button>
+  `;
+}
+
+function checkForPublicEventLink() {
+  const params = new URLSearchParams(window.location.search);
+  const eventId = params.get('event');
+  if (eventId) { loadPublicEvent(eventId); return true; }
+  return false;
+}
+
+// ── INIT ────────────────────────────────────────────────────
+if (!checkForPublicEventLink()) {
+  initAuth();
+}
 </script>
 </body>
 </html>
