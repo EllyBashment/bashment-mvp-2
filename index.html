@@ -121,7 +121,7 @@ button,input,select,textarea{font:inherit}
       <div class="stat"><b class="gold" id="statTotal">0</b><span>Events</span></div>
       <div class="stat"><b class="green" id="statLive">0</b><span>Live now</span></div>
       <div class="stat"><b id="statPublished">0</b><span>Published</span></div>
-      <div class="stat"><b id="statDraft">0</b><span>Drafts</span></div>
+      <div class="stat"><b class="gold" id="statViews">0</b><span>Total Views</span></div>
     </div>
     <div class="card" style="margin-top:14px;" id="dashRecentCard">
       <div class="eyebrow">Your most recent event</div>
@@ -344,11 +344,11 @@ function renderDashboard() {
   const total = myOwnEvents.length;
   const live = myOwnEvents.filter(e => e.is_live).length;
   const published = myOwnEvents.filter(e => e.status === 'published').length;
-  const draft = myOwnEvents.filter(e => e.status === 'draft').length;
+  const totalViews = myOwnEvents.reduce((sum, e) => sum + (e.view_count || 0), 0);
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statLive').textContent = live;
   document.getElementById('statPublished').textContent = published;
-  document.getElementById('statDraft').textContent = draft;
+  document.getElementById('statViews').textContent = totalViews;
 
   const recentEl = document.getElementById('dashRecentContent');
   if (!myOwnEvents.length) {
@@ -420,6 +420,12 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<
 function openEventDetail(ev) {
   window.currentDetailEvent = ev; // stored globally so edit/delete can safely reference it, not embedded in onclick
   const isOwner = ev.promoter_id === currentUser.id;
+
+  // Count views from other promoters discovering this via Explore — not the owner's own visits, which would just inflate the number meaninglessly
+  if (!isOwner) {
+    sb.rpc('increment_event_view', { event_id: ev.id }).then(() => {}).catch(() => {});
+  }
+
   const c = `
     <div class="eyebrow">Event</div>
     <div class="h1" style="font-size:20px">${escapeHtml(ev.title)}</div>
@@ -432,15 +438,21 @@ function openEventDetail(ev) {
     <div class="card" style="margin-top:10px;">
       <div class="metricline"><span>Status</span><b>${escapeHtml(ev.status)}</b></div>
       <div class="metricline"><span>Visibility</span><b style="color:${ev.is_private ? 'var(--gold)' : 'inherit'};">${ev.is_private ? 'Private — link only' : 'Public'}</b></div>
+      ${isOwner ? `<div class="metricline"><span>Views</span><b class="gold">${ev.view_count ?? 0}</b></div>` : ''}
       <div class="metricline"><span>Date</span><b>${ev.starts_at ? new Date(ev.starts_at).toLocaleDateString() : '—'}</b></div>
       <div class="metricline"><span>Genres</span><b>${escapeHtml(ev.genres || '—')}</b></div>
       <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
     </div>
     ${ev.lat && ev.lng ? `<button class="btn outline" style="margin-top:10px;" onclick="openDirections()">Get Directions</button>` : ''}
     ${isOwner ? `<button class="btn primary" style="margin-top:12px;" onclick="publishEvent('${ev.id}')">${ev.status === 'published' ? 'Mark as Live' : 'Publish Event'}</button>` : ''}
+    ${isOwner && ev.status === 'published' ? `
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="shareEvent('${ev.id}')">Share Link</button>
+      <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="copySocialCaption('${ev.id}')">Copy Caption</button>
+    </div>
+    ` : ''}
     ${isOwner ? `
     <div style="display:flex;gap:6px;margin-top:8px;">
-      ${ev.status === 'published' ? `<button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="shareEvent('${ev.id}')">Share</button>` : ''}
       <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="openEditEvent()">Edit</button>
       <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="openRepostEvent()">Repost</button>
     </div>
@@ -685,6 +697,44 @@ async function shareEvent(id) {
     toast('Link copied — paste it anywhere');
   } catch (e) {
     toast('Share link: ' + shareUrl);
+  }
+}
+
+function buildSocialCaption(ev, shareUrl) {
+  const dateStr = ev.starts_at
+    ? new Date(ev.starts_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    : null;
+  const genreHashtags = (ev.genres || '')
+    .split(',')
+    .map(g => g.trim())
+    .filter(Boolean)
+    .map(g => '#' + g.replace(/[^a-zA-Z0-9]/g, ''))
+    .join(' ');
+
+  const lines = [
+    `${ev.title} @ ${ev.venue_name}`,
+    dateStr ? `📅 ${dateStr}` : null,
+    '',
+    `Full details + directions on Bashment 👇`,
+    shareUrl,
+    '',
+    [genreHashtags, '#Bashment'].filter(Boolean).join(' ')
+  ].filter(line => line !== null);
+
+  return lines.join('\n');
+}
+
+async function copySocialCaption(id) {
+  const ev = window.currentDetailEvent;
+  if (!ev) return;
+  const shareUrl = `${window.location.origin}${window.location.pathname}?event=${id}`;
+  const caption = buildSocialCaption(ev, shareUrl);
+
+  try {
+    await navigator.clipboard.writeText(caption);
+    toast('Caption copied — paste it into your Instagram/Facebook post');
+  } catch (e) {
+    toast('Could not copy — try again');
   }
 }
 
@@ -1065,6 +1115,9 @@ async function loadPublicEvent(eventId) {
   }
 
   window.currentDetailEvent = ev; // so openDirections() works the same way here as in the app
+
+  // Count this as a real external view — public share links are the clearest signal of outside interest
+  sb.rpc('increment_event_view', { event_id: ev.id }).then(() => {}).catch(() => {});
 
   body.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;">
