@@ -424,7 +424,7 @@ function openSheet(type) {
       <div class="field"><label>Address in Jamaica (for the map) *</label><input id="ev-address" placeholder="e.g. 8 Stanton Terrace, Kingston"/></div>
       <div class="field"><label>Genres</label><input id="ev-genres" placeholder="e.g. Afrobeats, Dancehall"/></div>
       <div class="field"><label>Vibe Score (starting estimate)</label><input id="ev-vibe" type="number" min="0" max="100" placeholder="e.g. 70"/></div>
-      <button class="btn primary" onclick="createEvent()">Create Event</button>
+      <button class="btn primary" id="createEventBtn" onclick="submitNewEvent()">Create Event</button>
     `;
   }
   document.getElementById('sheet').classList.add('show');
@@ -506,7 +506,7 @@ async function geocodeAddress(address) {
   return null;
 }
 
-async function createEvent() {
+async function submitNewEvent() {
   const titleEl = document.getElementById('ev-title');
   const venueEl = document.getElementById('ev-venue');
   const addressEl = document.getElementById('ev-address');
@@ -528,25 +528,50 @@ async function createEvent() {
     return;
   }
 
-  toast('Locating venue…');
-  const coords = await geocodeAddress(address);
-  if (!coords) { toast('Could not find that address in Jamaica — try adding the parish or a landmark'); return; }
+  const createBtn = document.getElementById('createEventBtn');
+  if (createBtn) { createBtn.disabled = true; createBtn.textContent = 'Creating…'; }
 
-  const { error } = await sb.from('events').insert({
-    promoter_id: currentUser.id,
-    title, venue_name: venue, address,
-    lat: coords.lat, lng: coords.lng,
-    genres, vibe_score: vibe,
-    flyer_url: window.pendingFlyerUrl || null,
-    status: 'draft'
-  });
+  try {
+    toast('Locating venue…');
+    let coords;
+    try {
+      coords = await geocodeAddress(address);
+    } catch (geoErr) {
+      toast('Could not reach the map service: ' + (geoErr.message || 'unknown error'));
+      return;
+    }
+    if (!coords) { toast('Could not find that address in Jamaica — try adding the parish or a landmark'); return; }
 
-  window.pendingFlyerUrl = null;
+    toast('Saving event…');
+    let insertResult;
+    try {
+      insertResult = await sb.from('events').insert({
+        promoter_id: currentUser.id,
+        title, venue_name: venue, address,
+        lat: coords.lat, lng: coords.lng,
+        genres, vibe_score: vibe,
+        flyer_url: window.pendingFlyerUrl || null,
+        status: 'draft'
+      });
+    } catch (dbErr) {
+      toast('Could not save the event: ' + (dbErr.message || 'unknown error'));
+      return;
+    }
 
-  if (error) { toast('Could not create event'); return; }
-  closeSheet();
-  toast('Event created as draft — publish it from My Events');
-  loadEvents();
+    if (insertResult.error) {
+      toast('Could not create event: ' + insertResult.error.message);
+      return;
+    }
+
+    window.pendingFlyerUrl = null;
+    closeSheet();
+    toast('Event created as draft — publish it from My Events');
+    loadEvents();
+  } catch (unexpectedErr) {
+    toast('Unexpected error: ' + (unexpectedErr.message || String(unexpectedErr)));
+  } finally {
+    if (createBtn) { createBtn.disabled = false; createBtn.textContent = 'Create Event'; }
+  }
 }
 
 document.getElementById('sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
