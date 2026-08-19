@@ -137,6 +137,9 @@ button,input,select,textarea{font:inherit}
     <div class="map-empty hidden" id="mapEmptyState">
       No events yet. Tap <b style="color:var(--gold)">＋</b> to create your first one — it'll appear here and on the map instantly.
     </div>
+    <button class="btn primary hidden" id="nearbyListBtn" onclick="openNearbyList()" style="position:absolute;bottom:20px;left:15px;right:80px;width:auto;">
+      View List — Sorted for You
+    </button>
     <div class="map-fab" onclick="openSheet('create')" title="Create Event">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0a0600" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </div>
@@ -193,6 +196,8 @@ let currentUser = null;
 let map = null;
 let mapMode = 'mine';
 let markers = [];
+let userLocation = null; // { lng, lat } once geolocation resolves
+let promoterGenres = []; // this promoter's own genre preferences, for match-highlighting in Explore
 let myEvents = [];
 
 // ── AUTH ────────────────────────────────────────────────────
@@ -217,7 +222,7 @@ async function signOut() {
   go('entry');
 }
 
-function onSignedIn() {
+async function onSignedIn() {
   const initials = (currentUser.user_metadata?.full_name || currentUser.email || '??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   document.getElementById('avatarBtn').textContent = initials;
   document.getElementById('avatarBtnDash').textContent = initials;
@@ -229,6 +234,13 @@ function onSignedIn() {
   go('dashboard');
   setTimeout(initMap, 100);
   loadEvents();
+
+  // Pull this promoter's genre preferences from their original beta signup, if available —
+  // used to highlight genre-matched events in Explore. Fails silently if not found.
+  try {
+    const { data } = await sb.from('beta_applicants').select('genres').eq('user_id', currentUser.id).maybeSingle();
+    if (data?.genres) promoterGenres = data.genres.split(',').map(g => g.trim().toLowerCase()).filter(Boolean);
+  } catch (e) { /* no beta signup on file — genre matching just won't highlight anything */ }
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────
@@ -273,6 +285,7 @@ function initMap() {
     navigator.geolocation.getCurrentPosition(
       pos => {
         const { longitude: lng, latitude: lat } = pos.coords;
+        userLocation = { lng, lat };
         if (withinBbox(lng, lat, JAMAICA_BBOX)) {
           map.flyTo({ center: [lng, lat], zoom: 9.5 }); // Jamaica is compact — this shows most of the island
         } else if (withinBbox(lng, lat, NYC_METRO_BBOX)) {
@@ -289,6 +302,7 @@ function setMapMode(mode) {
   mapMode = mode;
   document.getElementById('toggleMine').classList.toggle('active', mode === 'mine');
   document.getElementById('toggleExplore').classList.toggle('active', mode === 'explore');
+  document.getElementById('nearbyListBtn').classList.toggle('hidden', mode !== 'explore');
   loadEvents();
 }
 
@@ -422,6 +436,87 @@ async function publishEvent(id) {
 }
 
 // ── CREATE EVENT ────────────────────────────────────────────
+// ── DISTANCE + NEARBY EVENTS LIST ──────────────────────────
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function eventMatchesPromoterGenres(eventGenres) {
+  if (!promoterGenres.length || !eventGenres) return false;
+  const evGenreList = eventGenres.split(',').map(g => g.trim().toLowerCase());
+  return evGenreList.some(g => promoterGenres.includes(g));
+}
+
+function openNearbyList() {
+  // Exclude the promoter's own events from Explore — they already see those under My Events
+  const others = mapEvents.filter(e => e.promoter_id !== currentUser.id);
+
+  const withDistance = others.map(ev => {
+    const distanceKm = (userLocation && ev.lat && ev.lng)
+      ? haversineKm(userLocation.lat, userLocation.lng, ev.lat, ev.lng)
+      : null;
+    return { ...ev, _distanceKm: distanceKm, _genreMatch: eventMatchesPromoterGenres(ev.genres) };
+  });
+
+  // Sort: genre-matched events first, then by proximity (closest first), unknown-distance events last
+  withDistance.sort((a, b) => {
+    if (a._genreMatch !== b._genreMatch) return a._genreMatch ? -1 : 1;
+    if (a._distanceKm === null && b._distanceKm === null) return 0;
+    if (a._distanceKm === null) return 1;
+    if (b._distanceKm === null) return -1;
+    return a._distanceKm - b._distanceKm;
+  });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const weekFromNow = new Date(today); weekFromNow.setDate(today.getDate() + 7);
+  const thisWeek = [], later = [], undated = [];
+  withDistance.forEach(ev => {
+    if (!ev.starts_at) { undated.push(ev); return; }
+    const d = new Date(ev.starts_at);
+    if (d <= weekFromNow) thisWeek.push(ev); else later.push(ev);
+  });
+
+  function renderGroup(label, items) {
+    if (!items.length) return '';
+    const rows = items.map(ev => {
+      const idx = window.nearbyListEvents.push(ev) - 1;
+      return `
+      <div class="card" style="margin-bottom:8px;cursor:pointer;" onclick="closeSheet();openEventDetail(window.nearbyListEvents[${idx}])">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div>
+            <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
+            <div class="sub" style="margin-top:2px;">${escapeHtml(ev.venue_name)}${ev._distanceKm !== null ? ` · ${ev._distanceKm.toFixed(1)} km away` : ''}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            ${ev._genreMatch ? '<span class="pill" style="margin-bottom:4px;display:block;">Genre Match</span>' : ''}
+            ${ev.is_live ? '<span class="pill livepill">LIVE</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+    }).join('');
+    return `<div class="eyebrow" style="margin-top:16px;">${label}</div>${rows}`;
+  }
+
+  window.nearbyListEvents = []; // reset each time the list opens
+
+  const content = withDistance.length
+    ? renderGroup('This Week', thisWeek) + renderGroup('Later', later) + renderGroup('Date TBD', undated)
+    : `<div class="sub" style="text-align:center;padding:20px 0;">No other events published yet in your area.</div>`;
+
+  document.getElementById('sheetContent').innerHTML = `
+    <div class="eyebrow">Explore</div>
+    <div class="h1" style="font-size:20px;">Events Near You</div>
+    <p class="sub" style="margin-top:4px;">${promoterGenres.length ? 'Sorted by genre match, then distance.' : 'Sorted by distance.'}</p>
+    ${content}
+  `;
+  document.getElementById('sheet').classList.add('show');
+}
+
 function openSheet(type) {
   if (type === 'create') {
     document.getElementById('sheetContent').innerHTML = `
@@ -438,6 +533,7 @@ function openSheet(type) {
       <div class="field"><label>Venue Name *</label><input id="ev-venue" placeholder="e.g. Pollyanna Caterers"/></div>
       <div class="field"><label>Address in Jamaica or NYC Metro (for the map) *</label><input id="ev-address" placeholder="e.g. 8 Stanton Terrace, Kingston or 123 Main St, Brooklyn"/></div>
       <div class="field"><label>Genres</label><input id="ev-genres" placeholder="e.g. Afrobeats, Dancehall"/></div>
+      <div class="field"><label>Event Date *</label><input id="ev-date" type="date"/></div>
       <div class="field"><label>Vibe Score (starting estimate)</label><input id="ev-vibe" type="number" min="0" max="100" placeholder="e.g. 70"/></div>
       <button class="btn primary" id="createEventBtn" onclick="submitNewEvent()">Create Event</button>
     `;
@@ -546,20 +642,23 @@ async function submitNewEvent() {
   const titleEl = document.getElementById('ev-title');
   const venueEl = document.getElementById('ev-venue');
   const addressEl = document.getElementById('ev-address');
+  const dateEl = document.getElementById('ev-date');
   const title = titleEl.value.trim();
   const venue = venueEl.value.trim();
   const address = addressEl.value.trim();
+  const eventDate = dateEl.value;
   const genres = document.getElementById('ev-genres').value.trim();
   const vibe = parseInt(document.getElementById('ev-vibe').value) || 70;
 
-  [titleEl, venueEl, addressEl].forEach(el => el.style.borderColor = 'rgba(245,166,35,.18)');
+  [titleEl, venueEl, addressEl, dateEl].forEach(el => el.style.borderColor = 'rgba(245,166,35,.18)');
   const missing = [];
   if (!title) { missing.push(titleEl); }
   if (!venue) { missing.push(venueEl); }
   if (!address) { missing.push(addressEl); }
+  if (!eventDate) { missing.push(dateEl); }
   if (missing.length) {
     missing.forEach(el => el.style.borderColor = '#ff4b3a');
-    toast('Please fill in the highlighted fields — Title, Venue, and Address are required');
+    toast('Please fill in the highlighted fields — Title, Venue, Address, and Date are required');
     missing[0].focus();
     return;
   }
@@ -586,6 +685,7 @@ async function submitNewEvent() {
         title, venue_name: venue, address,
         lat: coords.lat, lng: coords.lng,
         genres, vibe_score: vibe,
+        starts_at: eventDate,
         flyer_url: window.pendingFlyerUrl || null,
         status: 'draft'
       });
