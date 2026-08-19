@@ -102,8 +102,31 @@ button,input,select,textarea{font:inherit}
   </div>
 </section>
 
+<!-- DASHBOARD -->
+<section class="screen" id="dashboard">
+  <div class="top"><div class="logo">Bash<span>ment</span></div><button class="avatar" id="avatarBtnDash" onclick="go('profile')">--</button></div>
+  <div class="body">
+    <div class="eyebrow">Promoter Console</div>
+    <div class="h1" id="dashGreeting">Good to see you</div>
+    <p class="sub" style="margin:5px 0 14px">Your Bashment activity at a glance.</p>
+    <div class="grid2">
+      <div class="stat"><b class="gold" id="statTotal">0</b><span>Events</span></div>
+      <div class="stat"><b class="green" id="statLive">0</b><span>Live now</span></div>
+      <div class="stat"><b id="statPublished">0</b><span>Published</span></div>
+      <div class="stat"><b id="statDraft">0</b><span>Drafts</span></div>
+    </div>
+    <div class="card" style="margin-top:14px;" id="dashRecentCard">
+      <div class="eyebrow">Your most recent event</div>
+      <div id="dashRecentContent"><div class="sub">No events yet.</div></div>
+    </div>
+    <button class="btn primary" style="margin-top:14px;" onclick="openSheet('create')">＋ Create Event</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="go('mapview')">View Live Map</button>
+  </div>
+  <Nav active="dashboard"></Nav>
+</section>
+
 <!-- MAP HOME -->
-<section class="screen" id="mapscreen">
+<section class="screen" id="mapview">
   <div class="top"><div class="logo">Bash<span>ment</span></div><button class="avatar" id="avatarBtn" onclick="go('profile')">--</button></div>
   <div id="mapContainer">
     <div id="realMap"></div>
@@ -197,10 +220,13 @@ async function signOut() {
 function onSignedIn() {
   const initials = (currentUser.user_metadata?.full_name || currentUser.email || '??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   document.getElementById('avatarBtn').textContent = initials;
+  document.getElementById('avatarBtnDash').textContent = initials;
   document.getElementById('profileAvatar').textContent = initials;
   document.getElementById('profileName').textContent = currentUser.user_metadata?.full_name || currentUser.email;
   document.getElementById('profileEmail').textContent = currentUser.email;
-  go('mapscreen');
+  const firstName = (currentUser.user_metadata?.full_name || '').split(' ')[0];
+  document.getElementById('dashGreeting').textContent = firstName ? `Good to see you, ${firstName}` : 'Good to see you';
+  go('dashboard');
   setTimeout(initMap, 100);
   loadEvents();
 }
@@ -209,11 +235,13 @@ function onSignedIn() {
 function go(id) {
   document.querySelectorAll('.screen').forEach(x => x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  if (id === 'mapscreen' && map) setTimeout(() => map.resize(), 50);
+  if (id === 'mapview' && map) setTimeout(() => map.resize(), 50);
   if (id === 'eventslist') renderEventsList();
+  if (id === 'dashboard') renderDashboard();
 }
 function Nav(p){return `<div class="bottom">
-<button class="navbtn ${p==='map'?'active':''}" onclick="go('mapscreen')"><span class="navicon">⌂</span>Map</button>
+<button class="navbtn ${p==='dashboard'?'active':''}" onclick="go('dashboard')"><span class="navicon">◒</span>Dashboard</button>
+<button class="navbtn ${p==='map'?'active':''}" onclick="go('mapview')"><span class="navicon">⌂</span>Map</button>
 <button class="navbtn ${p==='events'?'active':''}" onclick="go('eventslist')"><span class="navicon">▣</span>My Events</button>
 <button class="navbtn ${p==='profile'?'active':''}" onclick="go('profile')"><span class="navicon">◉</span>Profile</button></div>`}
 
@@ -234,18 +262,12 @@ function initMap() {
   map = new mapboxgl.Map({
     container: 'realMap',
     style: 'mapbox://styles/mapbox/dark-v11',
-    center: [-76.79, 17.98], // Kingston, Jamaica — fallback while we detect the real location
-    zoom: 11
+    center: [-76.79, 17.98], // Kingston, Jamaica
+    zoom: 9,
+    minZoom: 7,
+    maxBounds: [[-79.0, 16.8], [-75.5, 19.0]] // locked to Jamaica for the beta
   });
   map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-
-  // Center on wherever this beta tester actually is, if they allow it
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      pos => { map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 12 }); },
-      err => { /* permission denied or unavailable — keep the fallback center, no error shown */ }
-    );
-  }
 }
 
 function setMapMode(mode) {
@@ -255,19 +277,53 @@ function setMapMode(mode) {
   loadEvents();
 }
 
+let myOwnEvents = []; // always the signed-in promoter's own events, regardless of map mode
+let mapEvents = [];   // whatever the map is currently showing (mine or explore)
+
 async function loadEvents() {
-  let query = sb.from('events').select('*');
+  // Always load the promoter's own events — this powers Dashboard, My Events, and the "mine" map mode
+  const { data: ownData, error: ownError } = await sb.from('events')
+    .select('*').eq('promoter_id', currentUser.id).order('created_at', { ascending: false });
+  if (!ownError) myOwnEvents = ownData || [];
+
+  // Load whatever the map should currently display
   if (mapMode === 'mine') {
-    query = query.eq('promoter_id', currentUser.id);
+    mapEvents = myOwnEvents;
   } else {
-    query = query.eq('status', 'published');
+    const { data: pubData, error: pubError } = await sb.from('events')
+      .select('*').eq('status', 'published').order('created_at', { ascending: false });
+    mapEvents = pubError ? [] : (pubData || []);
   }
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) { toast('Could not load events'); return; }
-  myEvents = data || [];
+
+  myEvents = mapEvents; // kept for backward compatibility with existing pin-click lookups
   renderMarkers();
   renderEventsList();
-  document.getElementById('profileEventCount').textContent = myEvents.filter(e => e.promoter_id === currentUser.id).length;
+  renderDashboard();
+  document.getElementById('profileEventCount').textContent = myOwnEvents.length;
+}
+
+function renderDashboard() {
+  const total = myOwnEvents.length;
+  const live = myOwnEvents.filter(e => e.is_live).length;
+  const published = myOwnEvents.filter(e => e.status === 'published').length;
+  const draft = myOwnEvents.filter(e => e.status === 'draft').length;
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statLive').textContent = live;
+  document.getElementById('statPublished').textContent = published;
+  document.getElementById('statDraft').textContent = draft;
+
+  const recentEl = document.getElementById('dashRecentContent');
+  if (!myOwnEvents.length) {
+    recentEl.innerHTML = `<div class="sub">No events yet — create your first one to see it here.</div>`;
+    return;
+  }
+  const ev = myOwnEvents[0];
+  recentEl.innerHTML = `
+    <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
+    <div class="sub" style="margin:2px 0 8px;">${escapeHtml(ev.venue_name)}</div>
+    <div class="metricline"><span>Status</span><b>${escapeHtml(ev.status)}</b></div>
+    <div class="metricline"><span>Vibe Score</span><b class="gold">${ev.vibe_score ?? '—'}</b></div>
+  `;
 }
 
 function renderMarkers() {
@@ -295,7 +351,7 @@ function renderMarkers() {
 
 function renderEventsList() {
   const body = document.getElementById('eventsListBody');
-  const mine = myEvents.filter(e => e.promoter_id === currentUser?.id);
+  const mine = myOwnEvents;
   if (!mine.length) {
     body.innerHTML = `<div class="sub" style="text-align:center;padding:40px 0;">No events yet.<br/><br/><button class="btn primary" style="width:auto;padding:12px 24px;" onclick="openSheet('create')">Create your first event</button></div>`;
     return;
@@ -365,7 +421,7 @@ function openSheet(type) {
       <div style="text-align:center;margin:14px 0;color:var(--dim);font-size:10px;">— OR —</div>
       <div class="field"><label>Event Title *</label><input id="ev-title" placeholder="AfroBeats Thursdays"/></div>
       <div class="field"><label>Venue Name *</label><input id="ev-venue" placeholder="Lotus Lounge"/></div>
-      <div class="field"><label>Address (for the map) *</label><input id="ev-address" placeholder="45 Howard Ave, Brooklyn, NY"/></div>
+      <div class="field"><label>Address in Jamaica (for the map) *</label><input id="ev-address" placeholder="Trafalgar Rd, Kingston"/></div>
       <div class="field"><label>Genres</label><input id="ev-genres" placeholder="Afrobeats, Dancehall"/></div>
       <div class="field"><label>Vibe Score (starting estimate)</label><input id="ev-vibe" type="number" min="0" max="100" value="70"/></div>
       <button class="btn primary" onclick="createEvent()">Create Event</button>
@@ -426,7 +482,7 @@ function fileToBase64(file) {
 }
 
 async function geocodeAddress(address) {
-  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&limit=1`;
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&country=jm&limit=1`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.features && data.features[0]) {
@@ -446,7 +502,7 @@ async function createEvent() {
 
   toast('Locating venue…');
   const coords = await geocodeAddress(address);
-  if (!coords) { toast('Could not find that address — try adding city/state'); return; }
+  if (!coords) { toast('Could not find that address in Jamaica — try adding the parish or a landmark'); return; }
 
   const { error } = await sb.from('events').insert({
     promoter_id: currentUser.id,
