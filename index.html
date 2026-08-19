@@ -433,6 +433,7 @@ function openEventDetail(ev) {
     ${isOwner ? `<button class="btn primary" style="margin-top:12px;" onclick="publishEvent('${ev.id}')">${ev.status === 'published' ? 'Mark as Live' : 'Publish Event'}</button>` : ''}
     ${isOwner && ev.status === 'published' ? `<button class="btn outline" style="margin-top:8px;" onclick="shareEvent('${ev.id}')">Share Event Link</button>` : ''}
     ${isOwner ? `<button class="btn outline" style="margin-top:8px;" onclick="openEditEvent()">Edit Event</button>` : ''}
+    ${isOwner ? `<button class="btn outline" style="margin-top:8px;" onclick="openRepostEvent()">Repost Event</button>` : ''}
     ${isOwner ? `<button class="btn outline" style="margin-top:8px;color:#ff6b55;border-color:rgba(255,59,31,.3);" onclick="confirmDeleteEvent()">Delete Event</button>` : ''}
     <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
   `;
@@ -579,6 +580,70 @@ async function deleteEventNow() {
     loadEvents();
   } catch (e) {
     toast('Unexpected error: ' + (e.message || String(e)));
+  }
+}
+
+function openRepostEvent() {
+  const ev = window.currentDetailEvent;
+  if (!ev) return;
+
+  // Smart default: one week after the original date, since weekly recurring nights are the common pattern
+  let suggestedDate = '';
+  if (ev.starts_at) {
+    const d = new Date(ev.starts_at);
+    d.setDate(d.getDate() + 7);
+    suggestedDate = d.toISOString().split('T')[0];
+  }
+
+  document.getElementById('sheetContent').innerHTML = `
+    <div class="eyebrow">Repost Event</div>
+    <div class="h1" style="font-size:20px">Run "${escapeHtml(ev.title)}" again</div>
+    <p class="sub" style="margin-top:6px;">Same venue, genres, flyer, and details — just pick the new date.</p>
+    ${ev.flyer_url ? `<div style="margin-top:12px;border-radius:14px;overflow:hidden;border:1px solid rgba(245,166,35,.2);"><img src="${escapeHtml(ev.flyer_url)}" style="width:100%;display:block;" alt="Event flyer"/></div>` : ''}
+    <div class="card" style="margin-top:12px;">
+      <div class="metricline"><span>Venue</span><b>${escapeHtml(ev.venue_name)}</b></div>
+      <div class="metricline"><span>Genres</span><b>${escapeHtml(ev.genres || '—')}</b></div>
+    </div>
+    <div class="field" style="margin-top:14px;"><label>New Event Date *</label><input id="repost-date" type="date" value="${suggestedDate}"/></div>
+    <button class="btn primary" id="repostBtn" onclick="submitRepost()">Create as New Draft</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="openEventDetail(window.currentDetailEvent)">Cancel</button>
+  `;
+}
+
+async function submitRepost() {
+  const ev = window.currentDetailEvent;
+  const dateEl = document.getElementById('repost-date');
+  const newDate = dateEl.value;
+  if (!newDate) {
+    dateEl.style.borderColor = '#ff4b3a';
+    toast('Please pick a date for the reposted event');
+    return;
+  }
+
+  const repostBtn = document.getElementById('repostBtn');
+  if (repostBtn) { repostBtn.disabled = true; repostBtn.textContent = 'Creating…'; }
+
+  try {
+    const { error } = await sb.from('events').insert({
+      promoter_id: currentUser.id,
+      title: ev.title, venue_name: ev.venue_name, address: ev.address,
+      lat: ev.lat, lng: ev.lng,
+      genres: ev.genres, vibe_score: ev.vibe_score,
+      starts_at: newDate,
+      is_private: ev.is_private || false,
+      flyer_url: ev.flyer_url || null,
+      status: 'draft'
+    });
+
+    if (error) { toast('Could not repost event: ' + error.message); return; }
+
+    toast('Reposted as a new draft — publish it from My Events when ready');
+    closeSheet();
+    loadEvents();
+  } catch (e) {
+    toast('Unexpected error: ' + (e.message || String(e)));
+  } finally {
+    if (repostBtn) { repostBtn.disabled = false; repostBtn.textContent = 'Create as New Draft'; }
   }
 }
 
