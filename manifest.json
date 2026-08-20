@@ -1,0 +1,14 @@
+{
+  "name": "Bashment — Nightlife Console",
+  "short_name": "Bashment",
+  "description": "The operating system for nightlife promoters in Jamaica and NYC.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08060a",
+  "theme_color": "#f5a623",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
