@@ -146,15 +146,11 @@ button,input,select,textarea{font:inherit}
   <div class="top"><div class="logo">Bash<span>ment</span></div><button class="avatar" id="avatarBtn" onclick="go('profile')">--</button></div>
   <div id="mapContainer">
     <div id="realMap"></div>
-    <div class="map-toggle">
-      <button class="map-toggle-btn" id="toggleMine" onclick="setMapMode('mine')">My Events</button>
-      <button class="map-toggle-btn active" id="toggleExplore" onclick="setMapMode('explore')">Explore</button>
-    </div>
-    <div id="favoritesStrip" style="position:absolute;top:120px;left:15px;right:15px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="favoritesStrip" style="position:absolute;top:70px;left:15px;right:15px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
     <div class="map-empty hidden" id="mapEmptyState">
       No events yet. Tap <b style="color:var(--gold)">＋</b> to create your first one — it'll appear here and on the map instantly.
     </div>
-    <button class="btn primary hidden" id="nearbyListBtn" onclick="openNearbyList()" style="position:absolute;bottom:20px;left:15px;right:80px;width:auto;">
+    <button class="btn primary" id="nearbyListBtn" onclick="openNearbyList()" style="position:absolute;bottom:20px;left:15px;right:80px;width:auto;">
       View List — Sorted for You
     </button>
     <div class="map-fab" onclick="openSheet('create')" title="Create Event">
@@ -230,8 +226,8 @@ let promoterGenres = []; // this promoter's own genre preferences, for match-hig
 let favorites = []; // up to 3 saved venues/events for quick map access, stored on the user's account
 
 // Same genre list used on the landing page, for consistency across the whole product
-const GENRE_OPTIONS = ['afrobeats', 'soca', 'house', 'hiphop', 'amapiano', 'reggae_dancehall', 'jazz', 'rnb'];
-const GENRE_LABELS = { afrobeats: 'Afrobeats', soca: 'Soca', house: 'House', hiphop: 'Hip-Hop', amapiano: 'Amapiano', reggae_dancehall: 'Reggae / Dancehall', jazz: 'Jazz', rnb: 'R&B' };
+const GENRE_OPTIONS = ['afrobeats', 'soca', 'house', 'hiphop', 'amapiano', 'reggae_dancehall', 'reggaeton', 'jazz', 'rnb'];
+const GENRE_LABELS = { afrobeats: 'Afrobeats', soca: 'Soca', house: 'House', hiphop: 'Hip-Hop', amapiano: 'Amapiano', reggae_dancehall: 'Reggae / Dancehall', reggaeton: 'Reggaeton', jazz: 'Jazz', rnb: 'R&B' };
 
 function renderProfileGenres() {
   const el = document.getElementById('profileGenreTags');
@@ -381,33 +377,20 @@ function initMap() {
   if (mapMode === 'explore') loadNearbyVenues();
 }
 
-function setMapMode(mode) {
-  mapMode = mode;
-  document.getElementById('toggleMine').classList.toggle('active', mode === 'mine');
-  document.getElementById('toggleExplore').classList.toggle('active', mode === 'explore');
-  document.getElementById('nearbyListBtn').classList.toggle('hidden', mode !== 'explore');
-  loadEvents();
-  if (mode === 'explore') { loadNearbyVenues(); } else { clearVenueMarkers(); }
-}
-
 let myOwnEvents = []; // always the signed-in promoter's own events, regardless of map mode
 let mapEvents = [];   // whatever the map is currently showing (mine or explore)
 
 async function loadEvents() {
-  // Always load the promoter's own events — this powers Dashboard, My Events, and the "mine" map mode
+  // Always load the promoter's own events — this powers Dashboard, My Events, and profile stats
   const { data: ownData, error: ownError } = await sb.from('events')
     .select('*').eq('promoter_id', currentUser.id).order('created_at', { ascending: false });
   if (!ownError) myOwnEvents = ownData || [];
 
-  // Load whatever the map should currently display
-  if (mapMode === 'mine') {
-    mapEvents = myOwnEvents;
-  } else {
-    // is_private events must NEVER appear in public browsing — only reachable via their direct share link
-    const { data: pubData, error: pubError } = await sb.from('events')
-      .select('*').eq('status', 'published').eq('is_private', false).order('created_at', { ascending: false });
-    mapEvents = pubError ? [] : (pubData || []);
-  }
+  // The map always shows the full public feed now (own events included, highlighted green) —
+  // is_private events must NEVER appear here, only reachable via their direct share link
+  const { data: pubData, error: pubError } = await sb.from('events')
+    .select('*').eq('status', 'published').eq('is_private', false).order('created_at', { ascending: false });
+  mapEvents = pubError ? [] : (pubData || []);
 
   myEvents = mapEvents; // kept for backward compatibility with existing pin-click lookups
   renderMarkers();
