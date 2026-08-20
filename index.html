@@ -33,7 +33,7 @@ button,input,select,textarea{font:inherit}
 .logo{font:800 21px var(--fd);color:#fff;letter-spacing:-.05em}
 .logo span{color:var(--gold)}
 .title{font:700 16px var(--fd);color:#fff}
-.avatar{width:32px;height:32px;border-radius:50%;background:var(--gold);color:#080500;display:grid;place-items:center;font-size:10px;font-weight:800;cursor:pointer;border:none}
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--gold);color:#080500;display:grid;place-items:center;font-size:10px;font-weight:800;cursor:pointer;border:none;overflow:hidden}
 .eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:800;margin-bottom:8px}
 .h1{font:800 23px var(--fd);letter-spacing:-.04em;color:#fff}
 .sub{font-size:12px;color:var(--mist);line-height:1.5}
@@ -122,8 +122,8 @@ button,input,select,textarea{font:inherit}
 <section class="screen" id="dashboard">
   <div class="top"><div class="logo">Bash<span>ment</span></div><button class="avatar" id="avatarBtnDash" onclick="go('profile')">--</button></div>
   <div class="body">
-    <div class="eyebrow">Promoter Console</div>
     <div class="h1" id="dashGreeting">Good to see you</div>
+    <div class="eyebrow">Promoter Console</div>
     <p class="sub" style="margin:5px 0 14px">Your Bashment activity at a glance.</p>
     <div id="dashNudges"></div>
     <div class="grid2">
@@ -137,7 +137,6 @@ button,input,select,textarea{font:inherit}
       <div id="dashRecentContent"><div class="sub">No events yet.</div></div>
     </div>
     <button class="btn primary" style="margin-top:14px;" onclick="openSheet('create')">＋ Create Event</button>
-    <button class="btn outline" style="margin-top:8px;" onclick="go('mapview')">View Live Map</button>
   </div>
   <Nav active="dashboard"></Nav>
 </section>
@@ -148,8 +147,8 @@ button,input,select,textarea{font:inherit}
   <div id="mapContainer">
     <div id="realMap"></div>
     <div class="map-toggle">
-      <button class="map-toggle-btn active" id="toggleMine" onclick="setMapMode('mine')">My Events</button>
-      <button class="map-toggle-btn" id="toggleExplore" onclick="setMapMode('explore')">Explore</button>
+      <button class="map-toggle-btn" id="toggleMine" onclick="setMapMode('mine')">My Events</button>
+      <button class="map-toggle-btn active" id="toggleExplore" onclick="setMapMode('explore')">Explore</button>
     </div>
     <div id="favoritesStrip" style="position:absolute;top:120px;left:15px;right:15px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
     <div class="map-empty hidden" id="mapEmptyState">
@@ -179,7 +178,13 @@ button,input,select,textarea{font:inherit}
   <div class="top"><div class="title">Profile</div><div></div></div>
   <div class="body">
     <div style="text-align:center;padding:10px 0 18px">
-      <div class="avatar" style="width:64px;height:64px;margin:auto;font-size:19px" id="profileAvatar">--</div>
+      <div class="avatar" style="width:64px;height:64px;margin:auto;font-size:19px;overflow:hidden;" id="profileAvatar">--</div>
+      <div style="margin-top:8px;">
+        <label style="font-size:10px;color:var(--gold);cursor:pointer;text-decoration:underline;">
+          Change Photo
+          <input type="file" accept=".jpg,.jpeg,.png" class="hidden" onchange="handleAvatarUpload(this)"/>
+        </label>
+      </div>
       <div class="h1" style="margin-top:9px" id="profileName">—</div>
       <div class="pill" style="margin-top:6px">PROMOTER</div>
     </div>
@@ -218,7 +223,7 @@ const FLYER_PARSE_FUNCTION_URL = 'https://bdeubrllozvxyhjkumzo.supabase.co/funct
 
 let currentUser = null;
 let map = null;
-let mapMode = 'mine';
+let mapMode = 'explore'; // defaults to Explore — My Events starts empty for new promoters, Explore shows real activity
 let markers = [];
 let userLocation = null; // { lng, lat } once geolocation resolves
 let promoterGenres = []; // this promoter's own genre preferences, for match-highlighting in Explore
@@ -278,9 +283,7 @@ async function signOut() {
 
 async function onSignedIn() {
   const initials = (currentUser.user_metadata?.full_name || currentUser.email || '??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-  document.getElementById('avatarBtn').textContent = initials;
-  document.getElementById('avatarBtnDash').textContent = initials;
-  document.getElementById('profileAvatar').textContent = initials;
+  renderAllAvatars(initials);
   document.getElementById('profileName').textContent = currentUser.user_metadata?.full_name || currentUser.email;
   document.getElementById('profileEmail').textContent = currentUser.email;
   const firstName = (currentUser.user_metadata?.full_name || '').split(' ')[0];
@@ -372,6 +375,10 @@ function initMap() {
     clearTimeout(moveendTimeout);
     moveendTimeout = setTimeout(() => { if (mapMode === 'explore') loadNearbyVenues(); }, 400);
   });
+
+  // Explore is the default mode now, so trigger an initial venue load right away — geolocation's
+  // own flyTo (if it succeeds) will trigger a fresh, more accurate load via moveend anyway.
+  if (mapMode === 'explore') loadNearbyVenues();
 }
 
 function setMapMode(mode) {
@@ -494,7 +501,10 @@ function renderMarkers() {
   withCoords.forEach(ev => {
     const el = document.createElement('div');
     el.className = 'mb-pin';
-    el.style.background = ev.is_live ? '#ff3b1f' : '#f5a623';
+    const isMine = ev.promoter_id === currentUser.id;
+    // In Explore mode, the promoter's own event stands out in green so they can spot themselves
+    // among everyone else's amber pins. "Live" always takes priority as the most urgent signal.
+    el.style.background = ev.is_live ? '#ff3b1f' : (isMine && mapMode === 'explore' ? '#00e676' : '#f5a623');
     el.textContent = ev.vibe_score ?? '·';
     el.addEventListener('click', () => openEventDetail(ev));
     const marker = new mapboxgl.Marker(el).setLngLat([ev.lng, ev.lat]).addTo(map);
@@ -559,16 +569,18 @@ async function loadNearbyVenues() {
       lounge: ['lounge'],
       bar: ['bar', 'pub', 'cocktail']
     };
-    const BLOCKED_KEYWORDS = ['performing_arts', 'theatre', 'theater', 'school', 'studio', 'academy', 'venue', 'concert_hall'];
+    const BLOCKED_KEYWORDS = ['performing_arts', 'theatre', 'theater', 'school', 'studio', 'academy', 'venue', 'concert_hall', 'juice_bar', 'juice_shop', 'smoothie_shop', 'coffee_shop', 'cafe', 'restaurant', 'snack_bar', 'salad_bar', 'sandwich_shop'];
 
     // Second, independent safety net: Mapbox's own category tags aren't always complete or accurate
     // (e.g. a martial arts studio wasn't tagged as "studio" but slipped through on the "nightlife"
     // category), so also check the venue's actual name for obvious non-nightlife businesses.
-    const NAME_BLOCKED_KEYWORDS = ['martial art', 'karate', 'taekwondo', 'jiu jitsu', 'jiu-jitsu', 'dojo', 'academy', 'studio', 'dance school', 'dance studio', 'yoga', 'fitness', 'gym', 'church', 'temple', 'mosque', 'museum', 'theatre', 'theater', 'school'];
+    const NAME_BLOCKED_KEYWORDS = ['martial art', 'karate', 'taekwondo', 'jiu jitsu', 'jiu-jitsu', 'dojo', 'academy', 'studio', 'dance school', 'dance studio', 'yoga', 'fitness', 'gym', 'church', 'temple', 'mosque', 'museum', 'theatre', 'theater', 'school', 'juice bar', 'juice shop', 'smoothie'];
 
     function classifyVenueType(cats) {
+      // Exact match, not substring — loose .includes() matching incorrectly caught things like
+      // "juice_bar" as "bar" (juice_bar contains the substring "bar" but isn't an alcohol bar).
       for (const [type, keywords] of Object.entries(TYPE_KEYWORDS)) {
-        if (cats.some(c => keywords.some(k => c.includes(k)))) return type;
+        if (cats.some(c => keywords.includes(c))) return type;
       }
       return null;
     }
@@ -578,7 +590,7 @@ async function loadNearbyVenues() {
       .map(f => {
         const cats = (f.properties.poi_category_ids || f.properties.poi_category || []).map(c => String(c).toLowerCase());
         const venueType = classifyVenueType(cats);
-        const isBlocked = cats.some(c => BLOCKED_KEYWORDS.some(k => c.includes(k)));
+        const isBlocked = cats.some(c => BLOCKED_KEYWORDS.includes(c));
         const nameLower = (f.properties.name || '').toLowerCase();
         const nameBlocked = NAME_BLOCKED_KEYWORDS.some(k => nameLower.includes(k));
         if (!venueType || isBlocked || nameBlocked) return null;
@@ -731,6 +743,40 @@ function renderEventsList() {
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ── AVATAR (custom upload → Google's own photo → initials fallback) ──
+function renderAllAvatars(initials) {
+  const photoUrl = currentUser.user_metadata?.custom_avatar_url || currentUser.user_metadata?.avatar_url || currentUser.user_metadata?.picture || null;
+  ['avatarBtn', 'avatarBtnDash', 'profileAvatar'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (photoUrl) {
+      el.innerHTML = `<img src="${escapeHtml(photoUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="Profile photo"/>`;
+    } else {
+      el.textContent = initials;
+    }
+  });
+}
+
+async function handleAvatarUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const ext = file.name.split('.').pop();
+    const path = `${currentUser.id}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await sb.storage.from('avatars').upload(path, file);
+    if (uploadError) { toast('Could not upload photo — try again'); return; }
+    const { data: urlData } = sb.storage.from('avatars').getPublicUrl(path);
+    const { error } = await sb.auth.updateUser({ data: { custom_avatar_url: urlData.publicUrl } });
+    if (error) { toast('Could not save photo: ' + error.message); return; }
+    const initials = (currentUser.user_metadata?.full_name || currentUser.email || '??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    currentUser.user_metadata.custom_avatar_url = urlData.publicUrl;
+    renderAllAvatars(initials);
+    toast('Profile photo updated');
+  } catch (e) {
+    toast('Unexpected error: ' + (e.message || String(e)));
+  }
+}
 
 function openEventDetail(ev) {
   window.currentDetailEvent = ev; // stored globally so edit/delete can safely reference it, not embedded in onclick
