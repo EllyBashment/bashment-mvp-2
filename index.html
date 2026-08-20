@@ -151,6 +151,7 @@ button,input,select,textarea{font:inherit}
       <button class="map-toggle-btn active" id="toggleMine" onclick="setMapMode('mine')">My Events</button>
       <button class="map-toggle-btn" id="toggleExplore" onclick="setMapMode('explore')">Explore</button>
     </div>
+    <div id="favoritesStrip" style="position:absolute;top:120px;left:15px;right:15px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"></div>
     <div class="map-empty hidden" id="mapEmptyState">
       No events yet. Tap <b style="color:var(--gold)">＋</b> to create your first one — it'll appear here and on the map instantly.
     </div>
@@ -221,6 +222,7 @@ let mapMode = 'mine';
 let markers = [];
 let userLocation = null; // { lng, lat } once geolocation resolves
 let promoterGenres = []; // this promoter's own genre preferences, for match-highlighting in Explore
+let favorites = []; // up to 3 saved venues/events for quick map access, stored on the user's account
 
 // Same genre list used on the landing page, for consistency across the whole product
 const GENRE_OPTIONS = ['afrobeats', 'soca', 'house', 'hiphop', 'amapiano', 'reggae_dancehall', 'jazz', 'rnb'];
@@ -304,6 +306,9 @@ async function onSignedIn() {
     } catch (e) { /* no beta signup on file either — genre matching just won't highlight anything yet */ }
   }
   renderProfileGenres();
+
+  favorites = Array.isArray(currentUser.user_metadata?.favorites) ? currentUser.user_metadata.favorites : [];
+  renderFavoritesStrip();
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────
@@ -591,13 +596,79 @@ function renderVenueMarkers(venues) {
   });
 }
 
+// ── FAVORITES (up to 3 saved venues/events for quick map access) ──
+function isFavorited(item) {
+  return favorites.some(f =>
+    (f.type === 'event' && item.type === 'event' && f.id === item.id) ||
+    (f.type === 'venue' && item.type === 'venue' && f.lat === item.lat && f.lng === item.lng)
+  );
+}
+
+async function toggleFavorite(item) {
+  const already = isFavorited(item);
+  let updated;
+  if (already) {
+    updated = favorites.filter(f =>
+      !((f.type === 'event' && item.type === 'event' && f.id === item.id) ||
+        (f.type === 'venue' && item.type === 'venue' && f.lat === item.lat && f.lng === item.lng))
+    );
+  } else {
+    if (favorites.length >= 3) {
+      toast('You can save up to 3 favorites — remove one first to add another');
+      return;
+    }
+    updated = [...favorites, item];
+  }
+
+  try {
+    const { error } = await sb.auth.updateUser({ data: { favorites: updated } });
+    if (error) { toast('Could not update favorites: ' + error.message); return; }
+    favorites = updated;
+    toast(already ? 'Removed from favorites' : 'Saved to favorites');
+    renderFavoritesStrip();
+    // Refresh whichever detail sheet is open so the star button reflects the new state
+    if (item.type === 'event' && window.currentDetailEvent) openEventDetail(window.currentDetailEvent);
+    if (item.type === 'venue') openVenueDetail(item);
+  } catch (e) {
+    toast('Unexpected error: ' + (e.message || String(e)));
+  }
+}
+
+function renderFavoritesStrip() {
+  const el = document.getElementById('favoritesStrip');
+  if (!el) return;
+  if (!favorites.length) { el.innerHTML = ''; return; }
+  window.favoritesRefs = favorites;
+  el.innerHTML = favorites.map((f, idx) => `
+    <span class="pill" style="cursor:pointer;padding:6px 10px;" onclick="jumpToFavorite(${idx})">★ ${escapeHtml(f.name)}</span>
+  `).join('');
+}
+
+async function jumpToFavorite(idx) {
+  const f = window.favoritesRefs[idx];
+  if (!f || !map) return;
+  map.flyTo({ center: [f.lng, f.lat], zoom: 15 });
+  if (f.type === 'venue') {
+    openVenueDetail(f);
+  } else if (f.type === 'event') {
+    // Fetch fresh event data by id, in case it's been edited/republished since it was favorited
+    const { data, error } = await sb.from('events').select('*').eq('id', f.id).maybeSingle();
+    if (error || !data) { toast('This event may have been removed'); return; }
+    openEventDetail(data);
+  }
+}
+
 function openVenueDetail(v) {
+  const favItem = { type: 'venue', name: v.name, address: v.address, lat: v.lat, lng: v.lng };
+  window.currentFavoriteCandidate = favItem; // safe reference — avoids embedding JSON directly in onclick
+  const favorited = isFavorited(favItem);
   document.getElementById('sheetContent').innerHTML = `
     <div class="eyebrow">Venue</div>
     <div class="h1" style="font-size:20px">${escapeHtml(v.name)}</div>
     <p class="sub" style="margin-top:6px;">${escapeHtml(v.address)}</p>
     <div class="notice" style="margin-top:14px;">Not yet on Bashment — no events posted here.</div>
     <button class="btn primary" style="margin-top:14px;" onclick="openDirections()">Get Directions</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="toggleFavorite(window.currentFavoriteCandidate)">${favorited ? '★ Remove Favorite' : '☆ Save as Favorite'}</button>
     <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
   `;
   // Reuse the existing directions function by giving it a minimal event-shaped object
@@ -633,6 +704,8 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<
 function openEventDetail(ev) {
   window.currentDetailEvent = ev; // stored globally so edit/delete can safely reference it, not embedded in onclick
   const isOwner = ev.promoter_id === currentUser.id;
+  const favItem = { type: 'event', id: ev.id, name: ev.title, lat: ev.lat, lng: ev.lng };
+  window.currentFavoriteCandidate = favItem;
 
   // Count views from other promoters discovering this via Explore — not the owner's own visits, which would just inflate the number meaninglessly
   if (!isOwner) {
@@ -657,6 +730,7 @@ function openEventDetail(ev) {
       <div class="metricline"><span>Address</span><b style="text-align:right;max-width:180px;">${escapeHtml(ev.address || '—')}</b></div>
     </div>
     ${ev.lat && ev.lng ? `<button class="btn outline" style="margin-top:10px;" onclick="openDirections()">Get Directions</button>` : ''}
+    ${ev.lat && ev.lng ? `<button class="btn outline" style="margin-top:8px;" onclick="toggleFavorite(window.currentFavoriteCandidate)">${isFavorited(favItem) ? '★ Remove Favorite' : '☆ Save as Favorite'}</button>` : ''}
     ${isOwner ? `<button class="btn primary" style="margin-top:12px;" onclick="publishEvent('${ev.id}')">${ev.status === 'published' ? 'Mark as Live' : 'Publish Event'}</button>` : ''}
     ${isOwner && ev.status === 'published' ? `
     <div style="display:flex;gap:6px;margin-top:8px;">
