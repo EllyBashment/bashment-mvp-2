@@ -359,6 +359,14 @@ function initMap() {
       err => { /* permission denied or unavailable — keep the NYC default */ }
     );
   }
+
+  // Refetch venues when the user pans somewhere new while in Explore mode — debounced so a drag
+  // gesture doesn't fire a request on every intermediate frame, only once panning actually settles.
+  let moveendTimeout;
+  map.on('moveend', () => {
+    clearTimeout(moveendTimeout);
+    moveendTimeout = setTimeout(() => { if (mapMode === 'explore') loadNearbyVenues(); }, 400);
+  });
 }
 
 function setMapMode(mode) {
@@ -497,23 +505,44 @@ function renderMarkers() {
 
 // ── UNCLAIMED VENUES (bars/clubs/lounges, populate the map even before promoters post events) ──
 let venueMarkers = [];
-const venueCache = {}; // keyed by region name — avoids re-billing Mapbox on every tab switch
+const venueCache = {}; // keyed by a coarse viewport grid cell — avoids re-billing Mapbox for areas already seen
 
 function clearVenueMarkers() {
   venueMarkers.forEach(m => m.remove());
   venueMarkers = [];
 }
 
-async function fetchVenuesForRegion(region, bbox) {
-  if (venueCache[region]) return venueCache[region]; // already fetched this session
+// Instead of fixed borough boxes, fetch venues for whatever's actually visible on screen right now,
+// biased toward the map's current center. Caches by a coarse grid cell so re-panning to an already-seen
+// area never re-fetches, but panning somewhere genuinely new (like Bronx → Queens) gets a fresh set.
+function viewportGridKey(center) {
+  // Round to ~0.03 degrees (roughly a couple miles) — fine enough to distinguish neighborhoods,
+  // coarse enough that small pans/zooms reuse the same cached fetch instead of re-billing Mapbox.
+  const roundedLng = Math.round(center.lng / 0.03) * 0.03;
+  const roundedLat = Math.round(center.lat / 0.03) * 0.03;
+  return `${roundedLng.toFixed(2)},${roundedLat.toFixed(2)}`;
+}
 
-  const bboxParam = `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
-  const url = `https://api.mapbox.com/search/searchbox/v1/category/nightlife?access_token=${mapboxgl.accessToken}&bbox=${bboxParam}&limit=25`;
+async function loadNearbyVenues() {
+  if (!map || mapMode !== 'explore') return;
+  const center = map.getCenter();
+  const inJamaica = withinBbox(center.lng, center.lat, JAMAICA_BBOX);
+  const inNyc = withinBbox(center.lng, center.lat, NYC_METRO_BBOX);
+  if (!inJamaica && !inNyc) return; // panned outside both beta regions — nothing to fetch
+
+  const gridKey = viewportGridKey(center);
+  if (venueCache[gridKey]) { renderVenueMarkers(venueCache[gridKey]); return; }
+
+  const bounds = map.getBounds();
+  const bboxParam = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+  const proximityParam = `${center.lng},${center.lat}`;
+  const url = `https://api.mapbox.com/search/searchbox/v1/category/nightlife?access_token=${mapboxgl.accessToken}&bbox=${bboxParam}&proximity=${proximityParam}&limit=25`;
+
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.error('Mapbox category search failed:', region, res.status, await res.text());
-      return [];
+      console.error('Mapbox category search failed:', res.status, await res.text());
+      return;
     }
     const data = await res.json();
     const venues = (data.features || []).map(f => ({
@@ -522,23 +551,12 @@ async function fetchVenuesForRegion(region, bbox) {
       lng: f.geometry.coordinates[0],
       lat: f.geometry.coordinates[1]
     }));
-    console.log(`Loaded ${venues.length} nearby venues for ${region}`);
-    venueCache[region] = venues;
-    return venues;
+    console.log(`Loaded ${venues.length} nearby venues for viewport ${gridKey}`);
+    venueCache[gridKey] = venues;
+    renderVenueMarkers(venues);
   } catch (e) {
-    console.error('Venue population error:', region, e);
-    return [];
+    console.error('Venue population error:', e);
   }
-}
-
-async function loadNearbyVenues() {
-  // Load both beta regions every time — only 2 possible regions ever, and each is cached after
-  // its first fetch, so this stays cheap while guaranteeing pins show up no matter where you pan.
-  const [jamaicaVenues, nycVenues] = await Promise.all([
-    fetchVenuesForRegion('jamaica', JAMAICA_BBOX),
-    fetchVenuesForRegion('nyc', NYC_METRO_BBOX)
-  ]);
-  renderVenueMarkers([...jamaicaVenues, ...nycVenues]);
 }
 
 function renderVenueMarkers(venues) {
@@ -546,7 +564,7 @@ function renderVenueMarkers(venues) {
   venues.forEach(v => {
     const el = document.createElement('div');
     el.className = 'mb-pin';
-    el.style.background = 'rgba(240,230,204,.28)'; // muted/dim — secondary to real Bashment events by design
+    el.style.background = 'rgba(245,166,35,.4)'; // muted gold — visible against the dark map, but dimmer than real event pins by design
     el.style.width = '22px';
     el.style.height = '22px';
     el.style.boxShadow = 'none';
