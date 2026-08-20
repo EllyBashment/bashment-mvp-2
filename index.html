@@ -545,13 +545,30 @@ async function loadNearbyVenues() {
       return;
     }
     const data = await res.json();
-    const venues = (data.features || []).map(f => ({
-      name: f.properties.name,
-      address: f.properties.full_address || f.properties.place_formatted || '',
-      lng: f.geometry.coordinates[0],
-      lat: f.geometry.coordinates[1]
-    }));
-    console.log(`Loaded ${venues.length} nearby venues for viewport ${gridKey}`);
+
+    // The "nightlife" category is broader than intended (includes performing arts venues, etc.) —
+    // filter using each result's own category tags to keep just bars, clubs, and lounges.
+    const ALLOWED_KEYWORDS = ['bar', 'night_club', 'nightclub', 'pub', 'lounge', 'cocktail'];
+    const BLOCKED_KEYWORDS = ['performing_arts', 'theatre', 'theater', 'school', 'studio', 'academy', 'venue', 'concert_hall'];
+
+    const allFeatures = data.features || [];
+    const venues = allFeatures
+      .filter(f => {
+        const cats = (f.properties.poi_category_ids || f.properties.poi_category || []).map(c => String(c).toLowerCase());
+        const isAllowed = cats.some(c => ALLOWED_KEYWORDS.some(k => c.includes(k)));
+        const isBlocked = cats.some(c => BLOCKED_KEYWORDS.some(k => c.includes(k)));
+        return isAllowed && !isBlocked;
+      })
+      .map(f => ({
+        name: f.properties.name,
+        address: f.properties.full_address || f.properties.place_formatted || '',
+        lng: f.geometry.coordinates[0],
+        lat: f.geometry.coordinates[1]
+      }));
+    console.log(`Loaded ${venues.length} bars/clubs/lounges (filtered from ${allFeatures.length} nightlife results) for viewport ${gridKey}`);
+    if (allFeatures.length) {
+      console.log('Raw category tags seen this fetch:', [...new Set(allFeatures.flatMap(f => f.properties.poi_category_ids || f.properties.poi_category || []))]);
+    }
     venueCache[gridKey] = venues;
     renderVenueMarkers(venues);
   } catch (e) {
