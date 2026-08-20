@@ -556,13 +556,20 @@ async function loadNearbyVenues() {
     const ALLOWED_KEYWORDS = ['bar', 'night_club', 'nightclub', 'pub', 'lounge', 'cocktail'];
     const BLOCKED_KEYWORDS = ['performing_arts', 'theatre', 'theater', 'school', 'studio', 'academy', 'venue', 'concert_hall'];
 
+    // Second, independent safety net: Mapbox's own category tags aren't always complete or accurate
+    // (e.g. a martial arts studio wasn't tagged as "studio" but slipped through on the "nightlife"
+    // category), so also check the venue's actual name for obvious non-nightlife businesses.
+    const NAME_BLOCKED_KEYWORDS = ['martial art', 'karate', 'taekwondo', 'jiu jitsu', 'jiu-jitsu', 'dojo', 'academy', 'studio', 'dance school', 'dance studio', 'yoga', 'fitness', 'gym', 'church', 'temple', 'mosque', 'museum', 'theatre', 'theater', 'school'];
+
     const allFeatures = data.features || [];
     const venues = allFeatures
       .filter(f => {
         const cats = (f.properties.poi_category_ids || f.properties.poi_category || []).map(c => String(c).toLowerCase());
         const isAllowed = cats.some(c => ALLOWED_KEYWORDS.some(k => c.includes(k)));
         const isBlocked = cats.some(c => BLOCKED_KEYWORDS.some(k => c.includes(k)));
-        return isAllowed && !isBlocked;
+        const nameLower = (f.properties.name || '').toLowerCase();
+        const nameBlocked = NAME_BLOCKED_KEYWORDS.some(k => nameLower.includes(k));
+        return isAllowed && !isBlocked && !nameBlocked;
       })
       .map(f => ({
         name: f.properties.name,
