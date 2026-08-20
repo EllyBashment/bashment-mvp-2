@@ -4,6 +4,12 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Bashment — Console</title>
+<link rel="manifest" href="/manifest.json"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Bashment"/>
+<meta name="theme-color" content="#f5a623"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet"/>
@@ -55,6 +61,8 @@ button,input,select,textarea{font:inherit}
 .notice{border-left:3px solid var(--gold);padding:9px 11px;background:rgba(245,166,35,.06);font-size:10px;line-height:1.5;color:var(--mist)}
 .hidden{display:none!important}
 .pill{display:inline-block;padding:4px 8px;border-radius:99px;font-size:9px;font-weight:700;background:rgba(245,166,35,.12);color:var(--gold);border:1px solid rgba(245,166,35,.22)}
+.genre-toggle{display:inline-flex;align-items:center;padding:7px 12px;border-radius:99px;font-size:10px;font-weight:600;background:rgba(255,255,255,.04);color:var(--dim);border:1px solid rgba(255,255,255,.1);cursor:pointer;transition:all .15s;user-select:none;}
+.genre-toggle.active{background:rgba(245,166,35,.16);color:var(--gold);border-color:rgba(245,166,35,.4);}
 .livepill{background:rgba(255,59,31,.16);color:#ff6b55;border-color:rgba(255,59,31,.3)}
 .metricline{display:flex;justify-content:space-between;font-size:11px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}
 .metricline:last-child{border-bottom:0}
@@ -117,6 +125,7 @@ button,input,select,textarea{font:inherit}
     <div class="eyebrow">Promoter Console</div>
     <div class="h1" id="dashGreeting">Good to see you</div>
     <p class="sub" style="margin:5px 0 14px">Your Bashment activity at a glance.</p>
+    <div id="dashNudges"></div>
     <div class="grid2">
       <div class="stat"><b class="gold" id="statTotal">0</b><span>Events</span></div>
       <div class="stat"><b class="green" id="statLive">0</b><span>Live now</span></div>
@@ -178,6 +187,12 @@ button,input,select,textarea{font:inherit}
       <div class="metricline"><span>Email</span><b id="profileEmail">—</b></div>
       <div class="metricline"><span>Events created</span><b id="profileEventCount">0</b></div>
     </div>
+    <div class="card" style="margin-top:10px;">
+      <div class="eyebrow">My Genre Preferences</div>
+      <p class="sub" style="margin-bottom:10px;">Used to highlight genre-matched events in Explore.</p>
+      <div id="profileGenreTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+      <button class="btn outline" style="font-size:11px;padding:9px;" onclick="saveProfileGenres()">Save Genres</button>
+    </div>
     <button class="btn outline" style="margin-top:14px;color:#ff6b55;border-color:rgba(255,59,31,.3);" onclick="signOut()">Sign Out</button>
   </div>
   <Nav active="profile"></Nav>
@@ -206,6 +221,35 @@ let mapMode = 'mine';
 let markers = [];
 let userLocation = null; // { lng, lat } once geolocation resolves
 let promoterGenres = []; // this promoter's own genre preferences, for match-highlighting in Explore
+
+// Same genre list used on the landing page, for consistency across the whole product
+const GENRE_OPTIONS = ['afrobeats', 'soca', 'house', 'hiphop', 'amapiano', 'reggae_dancehall', 'jazz', 'rnb'];
+const GENRE_LABELS = { afrobeats: 'Afrobeats', soca: 'Soca', house: 'House', hiphop: 'Hip-Hop', amapiano: 'Amapiano', reggae_dancehall: 'Reggae / Dancehall', jazz: 'Jazz', rnb: 'R&B' };
+
+function renderProfileGenres() {
+  const el = document.getElementById('profileGenreTags');
+  if (!el) return;
+  el.innerHTML = GENRE_OPTIONS.map(g => {
+    const active = promoterGenres.includes(g);
+    return `<span class="genre-toggle ${active ? 'active' : ''}" data-genre="${g}" onclick="toggleProfileGenre(this)">${GENRE_LABELS[g]}</span>`;
+  }).join('');
+}
+
+function toggleProfileGenre(el) {
+  el.classList.toggle('active');
+}
+
+async function saveProfileGenres() {
+  const selected = Array.from(document.querySelectorAll('#profileGenreTags .genre-toggle.active')).map(el => el.dataset.genre);
+  try {
+    const { error } = await sb.auth.updateUser({ data: { genres: selected } });
+    if (error) { toast('Could not save genres: ' + error.message); return; }
+    promoterGenres = selected;
+    toast('Genre preferences saved');
+  } catch (e) {
+    toast('Unexpected error: ' + (e.message || String(e)));
+  }
+}
 let myEvents = [];
 
 // ── AUTH ────────────────────────────────────────────────────
@@ -243,12 +287,23 @@ async function onSignedIn() {
   setTimeout(initMap, 100);
   loadEvents();
 
-  // Pull this promoter's genre preferences from their original beta signup, if available —
-  // used to highlight genre-matched events in Explore. Fails silently if not found.
-  try {
-    const { data } = await sb.from('beta_applicants').select('genres').eq('user_id', currentUser.id).maybeSingle();
-    if (data?.genres) promoterGenres = data.genres.split(',').map(g => g.trim().toLowerCase()).filter(Boolean);
-  } catch (e) { /* no beta signup on file — genre matching just won't highlight anything */ }
+  // Genre preferences live on the user's own account so they're editable from Profile.
+  // Fall back to the original beta signup data (if any) for existing testers, and migrate it into
+  // the user's account the first time so future sign-ins read from one consistent place.
+  const storedGenres = currentUser.user_metadata?.genres;
+  if (Array.isArray(storedGenres) && storedGenres.length) {
+    promoterGenres = storedGenres.map(g => g.toLowerCase());
+  } else {
+    try {
+      const { data } = await sb.from('beta_applicants').select('genres').eq('user_id', currentUser.id).maybeSingle();
+      if (data?.genres) {
+        const migrated = data.genres.split(',').map(g => g.trim()).filter(Boolean);
+        promoterGenres = migrated.map(g => g.toLowerCase());
+        sb.auth.updateUser({ data: { genres: migrated } }).catch(() => {}); // self-heal for next time
+      }
+    } catch (e) { /* no beta signup on file either — genre matching just won't highlight anything yet */ }
+  }
+  renderProfileGenres();
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────
@@ -312,6 +367,7 @@ function setMapMode(mode) {
   document.getElementById('toggleExplore').classList.toggle('active', mode === 'explore');
   document.getElementById('nearbyListBtn').classList.toggle('hidden', mode !== 'explore');
   loadEvents();
+  if (mode === 'explore') { loadNearbyVenues(); } else { clearVenueMarkers(); }
 }
 
 let myOwnEvents = []; // always the signed-in promoter's own events, regardless of map mode
@@ -350,6 +406,8 @@ function renderDashboard() {
   document.getElementById('statPublished').textContent = published;
   document.getElementById('statViews').textContent = totalViews;
 
+  renderDashNudges();
+
   const recentEl = document.getElementById('dashRecentContent');
   if (!myOwnEvents.length) {
     recentEl.innerHTML = `<div class="sub">No events yet — create your first one to see it here.</div>`;
@@ -367,6 +425,51 @@ function renderDashboard() {
     <div class="metricline"><span>Status</span><b>${escapeHtml(ev.status)}</b></div>
     <div class="metricline"><span>Vibe Score</span><b class="gold">${ev.vibe_score ?? '—'}</b></div>
   `;
+}
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr); target.setHours(0,0,0,0);
+  return Math.round((target - today) / 86400000);
+}
+
+function renderDashNudges() {
+  const el = document.getElementById('dashNudges');
+  if (!el) return;
+
+  const nudges = [];
+  const LOW_VIEWS_THRESHOLD = 5;
+  const APPROACHING_DAYS = 3;
+
+  myOwnEvents.forEach(ev => {
+    const d = daysUntil(ev.starts_at);
+    if (d === null || d < 0 || d > APPROACHING_DAYS) return; // only events happening soon, not past or far out
+
+    if (ev.status === 'draft') {
+      nudges.push({
+        ev, text: `"${ev.title}" is still a draft and happens ${d === 0 ? 'today' : `in ${d} day${d === 1 ? '' : 's'}`} — publish it so people can find it.`,
+        actionLabel: 'Publish Now', action: `publishEvent('${ev.id}')`
+      });
+    } else if (ev.status === 'published' && (ev.view_count || 0) < LOW_VIEWS_THRESHOLD) {
+      nudges.push({
+        ev, text: `"${ev.title}" happens ${d === 0 ? 'today' : `in ${d} day${d === 1 ? '' : 's'}`} and hasn't gotten much traction yet — consider sharing it.`,
+        actionLabel: 'Share via WhatsApp', action: `window.currentDetailEvent = window.dashNudgeEvents['${ev.id}']; shareToWhatsApp('${ev.id}')`
+      });
+    }
+  });
+
+  if (!nudges.length) { el.innerHTML = ''; return; }
+
+  window.dashNudgeEvents = {};
+  myOwnEvents.forEach(ev => { window.dashNudgeEvents[ev.id] = ev; });
+
+  el.innerHTML = nudges.map(n => `
+    <div class="notice" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="flex:1;min-width:180px;">${escapeHtml(n.text)}</span>
+      <button class="btn primary" style="width:auto;padding:8px 14px;font-size:10px;" onclick="${n.action}">${n.actionLabel}</button>
+    </div>
+  `).join('');
 }
 
 function renderMarkers() {
@@ -390,6 +493,70 @@ function renderMarkers() {
     withCoords.forEach(ev => bounds.extend([ev.lng, ev.lat]));
     map.fitBounds(bounds, { padding: 80, maxZoom: 14 });
   }
+}
+
+// ── UNCLAIMED VENUES (bars/clubs/lounges, populate the map even before promoters post events) ──
+let venueMarkers = [];
+const venueCache = {}; // keyed by region name — avoids re-billing Mapbox on every tab switch
+
+function clearVenueMarkers() {
+  venueMarkers.forEach(m => m.remove());
+  venueMarkers = [];
+}
+
+async function loadNearbyVenues() {
+  if (!map) return;
+  const center = map.getCenter();
+  let region, bbox;
+  if (withinBbox(center.lng, center.lat, JAMAICA_BBOX)) { region = 'jamaica'; bbox = JAMAICA_BBOX; }
+  else if (withinBbox(center.lng, center.lat, NYC_METRO_BBOX)) { region = 'nyc'; bbox = NYC_METRO_BBOX; }
+  else { return; } // outside both beta regions — no venue data to show
+
+  if (venueCache[region]) { renderVenueMarkers(venueCache[region]); return; } // already fetched this session
+
+  const bboxParam = `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
+  const url = `https://api.mapbox.com/search/searchbox/v1/category/nightlife?access_token=${mapboxgl.accessToken}&bbox=${bboxParam}&limit=25`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const venues = (data.features || []).map(f => ({
+      name: f.properties.name,
+      address: f.properties.full_address || f.properties.place_formatted || '',
+      lng: f.geometry.coordinates[0],
+      lat: f.geometry.coordinates[1]
+    }));
+    venueCache[region] = venues;
+    renderVenueMarkers(venues);
+  } catch (e) { /* venue population is a nice-to-have, not critical — fail silently */ }
+}
+
+function renderVenueMarkers(venues) {
+  clearVenueMarkers();
+  venues.forEach(v => {
+    const el = document.createElement('div');
+    el.className = 'mb-pin';
+    el.style.background = 'rgba(240,230,204,.28)'; // muted/dim — secondary to real Bashment events by design
+    el.style.width = '22px';
+    el.style.height = '22px';
+    el.style.boxShadow = 'none';
+    el.addEventListener('click', () => openVenueDetail(v));
+    const marker = new mapboxgl.Marker(el).setLngLat([v.lng, v.lat]).addTo(map);
+    venueMarkers.push(marker);
+  });
+}
+
+function openVenueDetail(v) {
+  document.getElementById('sheetContent').innerHTML = `
+    <div class="eyebrow">Venue</div>
+    <div class="h1" style="font-size:20px">${escapeHtml(v.name)}</div>
+    <p class="sub" style="margin-top:6px;">${escapeHtml(v.address)}</p>
+    <div class="notice" style="margin-top:14px;">Not yet on Bashment — no events posted here.</div>
+    <button class="btn primary" style="margin-top:14px;" onclick="openDirections()">Get Directions</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
+  `;
+  // Reuse the existing directions function by giving it a minimal event-shaped object
+  window.currentDetailEvent = { title: v.name, venue_name: v.name, lat: v.lat, lng: v.lng };
+  document.getElementById('sheet').classList.add('show');
 }
 
 function renderEventsList() {
@@ -449,6 +616,7 @@ function openEventDetail(ev) {
     <div style="display:flex;gap:6px;margin-top:8px;">
       <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="shareEvent('${ev.id}')">Share Link</button>
       <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="copySocialCaption('${ev.id}')">Copy Caption</button>
+      <button class="btn outline" style="flex:1;font-size:10px;padding:11px 6px;" onclick="shareToWhatsApp('${ev.id}')">WhatsApp</button>
     </div>
     ` : ''}
     ${isOwner ? `
@@ -671,8 +839,8 @@ async function submitRepost() {
 }
 
 async function publishEvent(id) {
-  const ev = myEvents.find(e => e.id === id);
-  const newStatus = ev.status === 'published' ? 'published' : 'published';
+  const ev = myOwnEvents.find(e => e.id === id);
+  if (!ev) { toast('Could not find that event — try refreshing'); return; }
   const newLive = ev.status === 'published' ? true : ev.is_live;
   const { error } = await sb.from('events').update({ status: 'published', is_live: newLive }).eq('id', id);
   if (error) { toast('Update failed'); return; }
@@ -736,6 +904,55 @@ async function copySocialCaption(id) {
   } catch (e) {
     toast('Could not copy — try again');
   }
+}
+
+function buildWhatsAppMessage(ev, shareUrl) {
+  const dateStr = ev.starts_at
+    ? new Date(ev.starts_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    : null;
+
+  // Unlike the social caption, this goes straight to individual people on a promoter's own list —
+  // so the Bashment mention and soft invite are written in, not just left to a link click
+  const lines = [
+    `🔥 ${ev.title} @ ${ev.venue_name}`,
+    dateStr ? `📅 ${dateStr}` : null,
+    '',
+    `Full details + directions: ${shareUrl}`,
+    '',
+    `📲 Found via Bashment — the fastest way to catch what's really happening in your city. Worth a look if you're not on it yet.`
+  ].filter(line => line !== null);
+
+  return lines.join('\n');
+}
+
+async function shareToWhatsApp(id) {
+  const ev = window.currentDetailEvent;
+  if (!ev) return;
+  const shareUrl = `${window.location.origin}${window.location.pathname}?event=${id}`;
+  const message = buildWhatsAppMessage(ev, shareUrl);
+
+  // Try to include the flyer image via the device's native share sheet — WhatsApp appears as one of
+  // the options there, and selecting it carries both the image and text through together.
+  // wa.me itself can only ever carry text, never an image — this is the closest real workaround.
+  if (ev.flyer_url && navigator.canShare) {
+    try {
+      const res = await fetch(ev.flyer_url);
+      const blob = await res.blob();
+      const file = new File([blob], 'flyer.jpg', { type: blob.type || 'image/jpeg' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: message });
+        return;
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user opened the share sheet and cancelled — respect that, don't also open wa.me
+      // any other error (fetch failed, feature unsupported, etc.) — fall through to the text-only fallback below
+    }
+  }
+
+  // Fallback: text-only, opens WhatsApp directly with the message pre-filled.
+  // The promoter still picks exactly who or which list/group to send it to themselves.
+  // Bashment never sees or stores their contacts.
+  window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
 }
 
 // ── DIRECTIONS ──────────────────────────────────────────────
@@ -832,15 +1049,50 @@ function openNearbyList() {
   // Exclude the promoter's own events from Explore — they already see those under My Events
   const others = mapEvents.filter(e => e.promoter_id !== currentUser.id);
 
-  const withDistance = others.map(ev => {
+  window.exploreAllEvents = others.map(ev => {
     const distanceKm = (userLocation && ev.lat && ev.lng)
       ? haversineKm(userLocation.lat, userLocation.lng, ev.lat, ev.lng)
       : null;
     return { ...ev, _distanceKm: distanceKm, _genreMatch: eventMatchesPromoterGenres(ev.genres) };
   });
+  window.exploreFilterGenres = []; // manually-selected filter chips, separate from auto genre-match highlighting
+  window.nearbyListEvents = [];
+
+  document.getElementById('sheetContent').innerHTML = `
+    <div class="eyebrow">Explore</div>
+    <div class="h1" style="font-size:20px;">Events Near You</div>
+    <p class="sub" style="margin-top:4px;">${promoterGenres.length ? 'Sorted by genre match, then distance.' : 'Sorted by distance.'}</p>
+    <div class="field" style="margin-top:12px;">
+      <input id="exploreSearch" placeholder="Search by event or venue name…" oninput="renderExploreList()"/>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;" id="exploreGenreFilters">
+      ${GENRE_OPTIONS.map(g => `<span class="genre-toggle" data-genre="${g}" onclick="toggleExploreFilter(this)">${GENRE_LABELS[g]}</span>`).join('')}
+    </div>
+    <div id="exploreResults"></div>
+  `;
+  document.getElementById('sheet').classList.add('show');
+  renderExploreList();
+}
+
+function toggleExploreFilter(el) {
+  el.classList.toggle('active');
+  window.exploreFilterGenres = Array.from(document.querySelectorAll('#exploreGenreFilters .genre-toggle.active')).map(e => e.dataset.genre);
+  renderExploreList();
+}
+
+function renderExploreList() {
+  const searchTerm = (document.getElementById('exploreSearch')?.value || '').trim().toLowerCase();
+  const activeFilters = window.exploreFilterGenres || [];
+
+  let filtered = (window.exploreAllEvents || []).filter(ev => {
+    const matchesSearch = !searchTerm || ev.title.toLowerCase().includes(searchTerm) || ev.venue_name.toLowerCase().includes(searchTerm);
+    const evGenreList = (ev.genres || '').split(',').map(g => g.trim().toLowerCase());
+    const matchesFilters = !activeFilters.length || activeFilters.some(g => evGenreList.includes(g));
+    return matchesSearch && matchesFilters;
+  });
 
   // Sort: genre-matched events first, then by proximity (closest first), unknown-distance events last
-  withDistance.sort((a, b) => {
+  filtered.sort((a, b) => {
     if (a._genreMatch !== b._genreMatch) return a._genreMatch ? -1 : 1;
     if (a._distanceKm === null && b._distanceKm === null) return 0;
     if (a._distanceKm === null) return 1;
@@ -851,11 +1103,13 @@ function openNearbyList() {
   const today = new Date(); today.setHours(0,0,0,0);
   const weekFromNow = new Date(today); weekFromNow.setDate(today.getDate() + 7);
   const thisWeek = [], later = [], undated = [];
-  withDistance.forEach(ev => {
+  filtered.forEach(ev => {
     if (!ev.starts_at) { undated.push(ev); return; }
     const d = new Date(ev.starts_at);
     if (d <= weekFromNow) thisWeek.push(ev); else later.push(ev);
   });
+
+  window.nearbyListEvents = []; // reset the safe index-lookup array each render
 
   function renderGroup(label, items) {
     if (!items.length) return '';
@@ -879,19 +1133,11 @@ function openNearbyList() {
     return `<div class="eyebrow" style="margin-top:16px;">${label}</div>${rows}`;
   }
 
-  window.nearbyListEvents = []; // reset each time the list opens
-
-  const content = withDistance.length
+  const content = filtered.length
     ? renderGroup('This Week', thisWeek) + renderGroup('Later', later) + renderGroup('Date TBD', undated)
-    : `<div class="sub" style="text-align:center;padding:20px 0;">No other events published yet in your area.</div>`;
+    : `<div class="sub" style="text-align:center;padding:20px 0;">${(window.exploreAllEvents || []).length ? 'No events match your search or filters.' : 'No other events published yet in your area.'}</div>`;
 
-  document.getElementById('sheetContent').innerHTML = `
-    <div class="eyebrow">Explore</div>
-    <div class="h1" style="font-size:20px;">Events Near You</div>
-    <p class="sub" style="margin-top:4px;">${promoterGenres.length ? 'Sorted by genre match, then distance.' : 'Sorted by distance.'}</p>
-    ${content}
-  `;
-  document.getElementById('sheet').classList.add('show');
+  document.getElementById('exploreResults').innerHTML = content;
 }
 
 function openSheet(type) {
@@ -1148,6 +1394,10 @@ function checkForPublicEventLink() {
 // ── INIT ────────────────────────────────────────────────────
 if (!checkForPublicEventLink()) {
   initAuth();
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {}); // installability only — safe to ignore failures
 }
 </script>
 </body>
