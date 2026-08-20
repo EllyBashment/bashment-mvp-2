@@ -504,23 +504,16 @@ function clearVenueMarkers() {
   venueMarkers = [];
 }
 
-async function loadNearbyVenues() {
-  if (!map) return;
-  const center = map.getCenter();
-  let region, bbox;
-  if (withinBbox(center.lng, center.lat, JAMAICA_BBOX)) { region = 'jamaica'; bbox = JAMAICA_BBOX; }
-  else if (withinBbox(center.lng, center.lat, NYC_METRO_BBOX)) { region = 'nyc'; bbox = NYC_METRO_BBOX; }
-  else { return; } // outside both beta regions — no venue data to show
-
-  if (venueCache[region]) { renderVenueMarkers(venueCache[region]); return; } // already fetched this session
+async function fetchVenuesForRegion(region, bbox) {
+  if (venueCache[region]) return venueCache[region]; // already fetched this session
 
   const bboxParam = `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
   const url = `https://api.mapbox.com/search/searchbox/v1/category/nightlife?access_token=${mapboxgl.accessToken}&bbox=${bboxParam}&limit=25`;
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.error('Mapbox category search failed:', res.status, await res.text());
-      return;
+      console.error('Mapbox category search failed:', region, res.status, await res.text());
+      return [];
     }
     const data = await res.json();
     const venues = (data.features || []).map(f => ({
@@ -531,10 +524,21 @@ async function loadNearbyVenues() {
     }));
     console.log(`Loaded ${venues.length} nearby venues for ${region}`);
     venueCache[region] = venues;
-    renderVenueMarkers(venues);
+    return venues;
   } catch (e) {
-    console.error('Venue population error:', e);
+    console.error('Venue population error:', region, e);
+    return [];
   }
+}
+
+async function loadNearbyVenues() {
+  // Load both beta regions every time — only 2 possible regions ever, and each is cached after
+  // its first fetch, so this stays cheap while guaranteeing pins show up no matter where you pan.
+  const [jamaicaVenues, nycVenues] = await Promise.all([
+    fetchVenuesForRegion('jamaica', JAMAICA_BBOX),
+    fetchVenuesForRegion('nyc', NYC_METRO_BBOX)
+  ]);
+  renderVenueMarkers([...jamaicaVenues, ...nycVenues]);
 }
 
 function renderVenueMarkers(venues) {
