@@ -552,8 +552,13 @@ async function loadNearbyVenues() {
     const data = await res.json();
 
     // The "nightlife" category is broader than intended (includes performing arts venues, etc.) —
-    // filter using each result's own category tags to keep just bars, clubs, and lounges.
-    const ALLOWED_KEYWORDS = ['bar', 'night_club', 'nightclub', 'pub', 'lounge', 'cocktail'];
+    // filter using each result's own category tags to keep just bars, clubs, and lounges, and
+    // classify which specific type each one is so the map can show a distinct icon per type.
+    const TYPE_KEYWORDS = {
+      nightclub: ['night_club', 'nightclub'],
+      lounge: ['lounge'],
+      bar: ['bar', 'pub', 'cocktail']
+    };
     const BLOCKED_KEYWORDS = ['performing_arts', 'theatre', 'theater', 'school', 'studio', 'academy', 'venue', 'concert_hall'];
 
     // Second, independent safety net: Mapbox's own category tags aren't always complete or accurate
@@ -561,22 +566,31 @@ async function loadNearbyVenues() {
     // category), so also check the venue's actual name for obvious non-nightlife businesses.
     const NAME_BLOCKED_KEYWORDS = ['martial art', 'karate', 'taekwondo', 'jiu jitsu', 'jiu-jitsu', 'dojo', 'academy', 'studio', 'dance school', 'dance studio', 'yoga', 'fitness', 'gym', 'church', 'temple', 'mosque', 'museum', 'theatre', 'theater', 'school'];
 
+    function classifyVenueType(cats) {
+      for (const [type, keywords] of Object.entries(TYPE_KEYWORDS)) {
+        if (cats.some(c => keywords.some(k => c.includes(k)))) return type;
+      }
+      return null;
+    }
+
     const allFeatures = data.features || [];
     const venues = allFeatures
-      .filter(f => {
+      .map(f => {
         const cats = (f.properties.poi_category_ids || f.properties.poi_category || []).map(c => String(c).toLowerCase());
-        const isAllowed = cats.some(c => ALLOWED_KEYWORDS.some(k => c.includes(k)));
+        const venueType = classifyVenueType(cats);
         const isBlocked = cats.some(c => BLOCKED_KEYWORDS.some(k => c.includes(k)));
         const nameLower = (f.properties.name || '').toLowerCase();
         const nameBlocked = NAME_BLOCKED_KEYWORDS.some(k => nameLower.includes(k));
-        return isAllowed && !isBlocked && !nameBlocked;
+        if (!venueType || isBlocked || nameBlocked) return null;
+        return {
+          name: f.properties.name,
+          address: f.properties.full_address || f.properties.place_formatted || '',
+          lng: f.geometry.coordinates[0],
+          lat: f.geometry.coordinates[1],
+          venueType
+        };
       })
-      .map(f => ({
-        name: f.properties.name,
-        address: f.properties.full_address || f.properties.place_formatted || '',
-        lng: f.geometry.coordinates[0],
-        lat: f.geometry.coordinates[1]
-      }));
+      .filter(Boolean);
     console.log(`Loaded ${venues.length} bars/clubs/lounges (filtered from ${allFeatures.length} nightlife results) for viewport ${gridKey}`);
     if (allFeatures.length) {
       console.log('Raw category tags seen this fetch:', [...new Set(allFeatures.flatMap(f => f.properties.poi_category_ids || f.properties.poi_category || []))]);
@@ -588,15 +602,24 @@ async function loadNearbyVenues() {
   }
 }
 
+// Simple, bold stroke icons — legible at small pin size, distinct at a glance by shape alone
+const VENUE_TYPE_ICONS = {
+  bar: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0a0600" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"/><path d="M4 5l8 9 8-9"/><path d="M12 14v6"/><path d="M8 20h8"/></svg>`,
+  nightclub: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0a0600" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  lounge: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0a0600" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a2 2 0 012-2h12a2 2 0 012 2v4H4v-4z"/><path d="M3 14v4M21 14v4M4 18h16"/><path d="M6 8V6a2 2 0 012-2h8a2 2 0 012 2v2"/></svg>`
+};
+const VENUE_TYPE_LABELS = { bar: 'Bar', nightclub: 'Night Club', lounge: 'Lounge' };
+
 function renderVenueMarkers(venues) {
   clearVenueMarkers();
   venues.forEach(v => {
     const el = document.createElement('div');
     el.className = 'mb-pin';
-    el.style.background = 'rgba(245,166,35,.4)'; // muted gold — visible against the dark map, but dimmer than real event pins by design
-    el.style.width = '22px';
-    el.style.height = '22px';
+    el.style.background = 'rgba(245,166,35,.55)'; // muted gold — visible against the dark map, but dimmer than real event pins by design
+    el.style.width = '24px';
+    el.style.height = '24px';
     el.style.boxShadow = 'none';
+    el.innerHTML = VENUE_TYPE_ICONS[v.venueType] || '';
     el.addEventListener('click', () => openVenueDetail(v));
     const marker = new mapboxgl.Marker(el).setLngLat([v.lng, v.lat]).addTo(map);
     venueMarkers.push(marker);
@@ -673,6 +696,7 @@ function openVenueDetail(v) {
     <div class="eyebrow">Venue</div>
     <div class="h1" style="font-size:20px">${escapeHtml(v.name)}</div>
     <p class="sub" style="margin-top:6px;">${escapeHtml(v.address)}</p>
+    ${v.venueType ? `<span class="pill" style="margin-top:8px;">${VENUE_TYPE_LABELS[v.venueType] || v.venueType}</span>` : ''}
     <div class="notice" style="margin-top:14px;">Not yet on Bashment — no events posted here.</div>
     <button class="btn primary" style="margin-top:14px;" onclick="openDirections()">Get Directions</button>
     <button class="btn outline" style="margin-top:8px;" onclick="toggleFavorite(window.currentFavoriteCandidate)">${favorited ? '★ Remove Favorite' : '☆ Save as Favorite'}</button>
