@@ -518,6 +518,10 @@ async function loadNearbyVenues() {
   const url = `https://api.mapbox.com/search/searchbox/v1/category/nightlife?access_token=${mapboxgl.accessToken}&bbox=${bboxParam}&limit=25`;
   try {
     const res = await fetch(url);
+    if (!res.ok) {
+      console.error('Mapbox category search failed:', res.status, await res.text());
+      return;
+    }
     const data = await res.json();
     const venues = (data.features || []).map(f => ({
       name: f.properties.name,
@@ -525,9 +529,12 @@ async function loadNearbyVenues() {
       lng: f.geometry.coordinates[0],
       lat: f.geometry.coordinates[1]
     }));
+    console.log(`Loaded ${venues.length} nearby venues for ${region}`);
     venueCache[region] = venues;
     renderVenueMarkers(venues);
-  } catch (e) { /* venue population is a nice-to-have, not critical — fail silently */ }
+  } catch (e) {
+    console.error('Venue population error:', e);
+  }
 }
 
 function renderVenueMarkers(venues) {
