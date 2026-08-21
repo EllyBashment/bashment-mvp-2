@@ -115,7 +115,7 @@ button,input,select,textarea{font:inherit}
       </button>
       <div class="notice" style="margin-top:12px">Signing in uses the same Bashment account as your beta signup.</div>
     </div>
-    <button class="btn outline" style="margin-top:14px;border-color:var(--blue);color:var(--blue);" onclick="renderPatronFeed();go('patronHome')">
+    <button class="btn outline" style="margin-top:14px;border-color:var(--blue);color:var(--blue);" onclick="go('patronProfile')">
       Preview Patron Vision Demo (no sign-in needed)
     </button>
   </div>
@@ -201,7 +201,7 @@ button,input,select,textarea{font:inherit}
     <div class="card" style="margin-top:14px;border-color:rgba(91,156,255,.3);">
       <div class="eyebrow" style="color:var(--blue);">Vision Preview</div>
       <p class="sub" style="margin-bottom:10px;">See the full consumer/patron experience from the Bashment roadmap — heat maps, Vibe Score, Circles, Crowd Timeline. This is a visual demo with simulated data, not live functionality.</p>
-      <button class="btn outline" style="border-color:var(--blue);color:var(--blue);" onclick="go('patronHome')">Preview Patron Experience</button>
+      <button class="btn outline" style="border-color:var(--blue);color:var(--blue);" onclick="go('patronProfile')">Preview Patron Experience</button>
     </div>
     <button class="btn outline" style="margin-top:14px;color:#ff6b55;border-color:rgba(255,59,31,.3);" onclick="signOut()">Sign Out</button>
   </div>
@@ -212,21 +212,55 @@ button,input,select,textarea{font:inherit}
      Everything in this block is a visual mockup with simulated data,
      illustrating landing-page features that need real infrastructure
      and real users before they can be built for production. Nothing
-     here is live functionality. ═══════════════════════════════════ -->
+     here is live functionality. Structure finalized through direct
+     UX review: Profile (lands here) / What's Hot / Circles / Map.
+     ═══════════════════════════════════════════════════════════ -->
 
-<!-- PATRON DISCOVER ("What's Hot Tonight") -->
-<section class="screen" id="patronHome">
+<!-- PATRON PROFILE (landing screen) -->
+<section class="screen" id="patronProfile">
   <div class="top"><div class="logo">Bash<span>ment</span></div><span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO</span></div>
   <div class="body">
-    <div class="eyebrow">Discover</div>
-    <div class="h1" style="font-size:20px;">What's Hot Tonight</div>
-    <div style="display:flex;gap:6px;margin:12px 0;">
-      <span class="pill" style="background:rgba(255,59,31,.16);color:#ff6b55;border-color:rgba(255,59,31,.3);">🔥 Hot</span>
-      <span class="pill">Relaxed</span>
+    <div style="text-align:center;padding:10px 0 18px">
+      <div class="avatar" style="width:64px;height:64px;margin:auto;font-size:19px">JD</div>
+      <div class="h1" style="margin-top:9px">Hi Jordan, welcome to Bashment</div>
+      <p class="sub" style="margin-top:4px;">Your nightlife, all in one place.</p>
     </div>
-    <div id="patronFeed"></div>
+    <div class="card">
+      <div class="eyebrow">Your Favorites</div>
+      <p class="sub" style="margin-bottom:8px;">Up to 3 events you're most excited about.</p>
+      <div id="patronProfileFavorites"></div>
+    </div>
   </div>
-  <PatronNav active="map"></PatronNav>
+  <PatronNav active="profile"></PatronNav>
+</section>
+
+<!-- PATRON WHAT'S HOT (trending discovery, not just "tonight") -->
+<section class="screen" id="patronWhatsHot">
+  <div class="top"><div class="logo">Bash<span>ment</span></div><span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO</span></div>
+  <div class="body">
+    <div class="eyebrow">What's Hot</div>
+    <div class="h1" style="font-size:20px;">Trending This Week</div>
+    <p class="sub" style="margin:4px 0 12px;">Ranked by RSVPs and engagement — not just tonight, the next 7 days.</p>
+    <div id="patronWhatsHotFeed"></div>
+  </div>
+  <PatronNav active="whatshot"></PatronNav>
+</section>
+
+<!-- PATRON CIRCLES & PINGS -->
+<section class="screen" id="patronCircles">
+  <div class="top"><div class="title">Circles</div><span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO</span></div>
+  <div class="body">
+    <div class="notice" style="margin-bottom:14px;">Needs a real friends/social graph and push notifications — shown here with simulated members.</div>
+    <div class="card" style="margin-bottom:14px;">
+      <div class="eyebrow">Your Circle — 3 of 5</div>
+      <div id="patronCircleMembers"></div>
+      <button class="btn outline" style="margin-top:10px;font-size:11px;" onclick="toast('Invite sent (demo) — real invites need a working social graph')">+ Invite to Circle</button>
+      <p class="sub" style="margin-top:8px;">Circles cap at 5 free — a paid tier could unlock a wider circle later.</p>
+    </div>
+    <div class="eyebrow">Circle Activity</div>
+    <div id="patronCirclesFeed"></div>
+  </div>
+  <PatronNav active="circles"></PatronNav>
 </section>
 
 <!-- PATRON HEAT MAP -->
@@ -242,25 +276,6 @@ button,input,select,textarea{font:inherit}
   <PatronNav active="map"></PatronNav>
 </section>
 
-<!-- PATRON CIRCLES & PINGS -->
-<section class="screen" id="patronCircles">
-  <div class="top"><div class="title">Circles</div><span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO</span></div>
-  <div class="body">
-    <div class="notice" style="margin-bottom:14px;">Needs a real friends/social graph and push notifications — shown here with simulated friends.</div>
-    <div id="patronCirclesFeed"></div>
-  </div>
-  <PatronNav active="circles"></PatronNav>
-</section>
-
-<!-- PATRON WANTING (favorites/interest list) -->
-<section class="screen" id="patronWanting">
-  <div class="top"><div class="title">Wanting</div><span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO</span></div>
-  <div class="body">
-    <div class="notice" style="margin-bottom:14px;">Events you've pinged interest in — RSVP and ticketing shown here are simulated, not connected to real payments.</div>
-    <div id="patronWantingFeed"></div>
-  </div>
-  <PatronNav active="wanting"></PatronNav>
-</section>
 
 <!-- SHEETS -->
 <div class="sheet" id="sheet"><div class="sheetin"><div class="handle"></div><div id="sheetContent"></div></div></div>
@@ -379,10 +394,10 @@ function go(id) {
   if (id === 'mapview' && map) setTimeout(() => map.resize(), 50);
   if (id === 'eventslist') renderEventsList();
   if (id === 'dashboard') renderDashboard();
-  if (id === 'patronHome') renderPatronFeed();
+  if (id === 'patronProfile') renderPatronProfile();
+  if (id === 'patronWhatsHot') renderPatronWhatsHot();
   if (id === 'patronMap') setTimeout(initPatronMap, 100);
   if (id === 'patronCircles') renderPatronCircles();
-  if (id === 'patronWanting') renderPatronWanting();
 }
 function Nav(p){return `<div class="bottom">
 <button class="navbtn ${p==='dashboard'?'active':''}" onclick="go('dashboard')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></span>Dashboard</button>
@@ -391,11 +406,11 @@ function Nav(p){return `<div class="bottom">
 <button class="navbtn ${p==='profile'?'active':''}" onclick="go('profile')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Profile</button></div>`}
 
 function PatronNav(p){return `<div class="bottom">
-<button class="navbtn ${p==='map'?'active':''}" onclick="go('patronMap')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg></span>Map</button>
-<button class="navbtn ${p==='discover'?'active':''}" onclick="go('patronHome')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></span>Discover</button>
+<button class="navbtn ${p==='profile'?'active':''}" onclick="go('patronProfile')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Profile</button>
+<button class="navbtn ${p==='whatshot'?'active':''}" onclick="go('patronWhatsHot')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c-2 4-6 6-6 11a6 6 0 0012 0c0-2-1-3-2-4 .5 2-1 3-2 2 1-2-1-4-2-9z"/></svg></span>What's Hot</button>
 <button class="navbtn ${p==='circles'?'active':''}" onclick="go('patronCircles')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="4"/><circle cx="16" cy="16" r="4"/></svg></span>Circles</button>
-<button class="navbtn ${p==='wanting'?'active':''}" onclick="go('patronWanting')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z"/></svg></span>Wanting</button>
-<button class="navbtn" onclick="go('profile')" style="flex:.6;"><span class="navicon" style="font-size:9px;color:var(--dim);">Exit Demo</span></button></div>`}
+<button class="navbtn ${p==='map'?'active':''}" onclick="go('patronMap')"><span class="navicon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg></span>Map</button>
+<button class="navbtn" onclick="go('profile')" style="flex:.6;"><span class="navicon" style="font-size:8px;color:var(--dim);">Exit</span></button></div>`}
 
 // The <Nav active="..."> and <PatronNav active="..."> tags in the HTML are placeholders — replace each with real nav bar markup now
 function renderAllNavBars() {
@@ -411,67 +426,105 @@ function renderAllNavBars() {
 renderAllNavBars();
 function toast(msg){let t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),4000)}
 
+
 // ══════════════ VISION DEMO: PATRON EXPERIENCE ══════════════
-// All data below is simulated for demonstration only — illustrates landing-page features
-// (heat map, live Vibe Score, Circles & Pings, Crowd Timeline, ticketing) that need real
-// infrastructure and a real user base before they can be built for production.
+// All data below is simulated for demonstration only. Structure finalized through
+// direct UX review: Profile (lands here) / What's Hot / Circles / Map — 4 tabs,
+// each answering a genuinely different question (personal / trending / social / spatial).
 const PATRON_DEMO_EVENTS = [
-  { id: 'demo1', title: 'AfroBeats Thursdays', venue: 'Lotus Lounge', vibeScore: 88, tag: 'hot', genres: 'Afrobeats', time: '10:00 PM - 4:00 AM', crowd: [20,35,55,80,95,90,70,40], lat: 40.7230, lng: -73.9950, priceEarly: 20, priceGeneral: 30, pinged: ['Fred', 'Aisha'] },
-  { id: 'demo2', title: 'Rooftop Social', venue: 'Skybar', vibeScore: 64, tag: 'relaxed', genres: 'House, R&B', time: '8:00 PM - 1:00 AM', crowd: [10,25,40,55,60,50,30,15], lat: 40.7180, lng: -73.9900, priceEarly: 15, priceGeneral: 25, pinged: ['Jasmine'] },
-  { id: 'demo3', title: 'Dancehall Fridays', venue: 'The Triangle', vibeScore: 92, tag: 'hot', genres: 'Dancehall, Soca', time: '11:00 PM - 5:00 AM', crowd: [15,30,60,85,98,95,80,50], lat: 18.0080, lng: -76.7900, priceEarly: 25, priceGeneral: 35, pinged: ['Marcus', 'Kayla', 'Devon'] }
+  { id: 'demo1', title: 'AfroBeats Thursdays', venue: 'Lotus Lounge', vibeScore: 88, rsvpCount: 132, genres: 'Afrobeats', time: '10:00 PM - 4:00 AM', crowd: [20,35,55,80,95,90,70,40], lat: 40.7230, lng: -73.9950, priceEarly: 20, priceGeneral: 30, vipPrice: 45, skipLinePrice: 15, pinged: ['Fred', 'Aisha'] },
+  { id: 'demo2', title: 'Rooftop Social', venue: 'Skybar', vibeScore: 64, rsvpCount: 58, genres: 'House, R&B', time: '8:00 PM - 1:00 AM', crowd: [10,25,40,55,60,50,30,15], lat: 40.7180, lng: -73.9900, priceEarly: 15, priceGeneral: 25, vipPrice: 35, skipLinePrice: 10, pinged: ['Jasmine'] },
+  { id: 'demo3', title: 'Dancehall Fridays', venue: 'The Triangle', vibeScore: 92, rsvpCount: 210, genres: 'Dancehall, Soca', time: '11:00 PM - 5:00 AM', crowd: [15,30,60,85,98,95,80,50], lat: 18.0080, lng: -76.7900, priceEarly: 25, priceGeneral: 35, vipPrice: 55, skipLinePrice: 20, pinged: ['Marcus', 'Kayla', 'Devon'] }
 ];
-const PATRON_DEMO_FRIENDS = [
+const PATRON_DEMO_CIRCLE = [
+  { name: 'Fred', status: 'accepted' },
+  { name: 'Aisha', status: 'accepted' },
+  { name: 'Jasmine', status: 'pending' }
+];
+const PATRON_DEMO_ACTIVITY = [
   { name: 'Fred', action: 'pinged AfroBeats Thursdays @ Lotus' },
   { name: 'Aisha', action: 'is going to AfroBeats Thursdays @ Lotus' },
-  { name: 'Jasmine', action: 'pinged Rooftop Social @ Skybar' },
   { name: 'Marcus', action: "RSVP'd to Dancehall Fridays @ The Triangle" }
 ];
 
-function renderPatronFeed() {
-  const el = document.getElementById('patronFeed');
+let patronFavorites = ['demo1']; // demo starting state — capped at 3, hard limit (not a preview)
+
+function togglePatronFavorite(id) {
+  if (patronFavorites.includes(id)) {
+    patronFavorites = patronFavorites.filter(f => f !== id);
+  } else {
+    if (patronFavorites.length >= 3) {
+      toast('You can favorite up to 3 events — remove one first to add another');
+      return;
+    }
+    patronFavorites.push(id);
+  }
+  renderPatronProfile();
+}
+
+function renderPatronProfile() {
+  const el = document.getElementById('patronProfileFavorites');
   if (!el) return;
-  el.innerHTML = PATRON_DEMO_EVENTS.map(ev => `
+  const favEvents = PATRON_DEMO_EVENTS.filter(ev => patronFavorites.includes(ev.id));
+  el.innerHTML = favEvents.length ? favEvents.map(ev => `
+    <div class="card" style="margin-bottom:8px;cursor:pointer;" onclick="openPatronEventDetail('${ev.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
+          <div class="sub" style="margin-top:2px;">@ ${escapeHtml(ev.venue)}</div>
+        </div>
+        <span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">Vibe ${ev.vibeScore}</span>
+      </div>
+    </div>
+  `).join('') : `<div class="sub" style="text-align:center;padding:14px 0;">No favorites yet — tap the star on any event to save it here.</div>`;
+}
+
+function renderPatronWhatsHot() {
+  const el = document.getElementById('patronWhatsHotFeed');
+  if (!el) return;
+  const ranked = [...PATRON_DEMO_EVENTS].sort((a, b) => b.rsvpCount - a.rsvpCount);
+  el.innerHTML = ranked.map((ev, idx) => `
     <div class="card" style="margin-bottom:10px;cursor:pointer;" onclick="openPatronEventDetail('${ev.id}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
+          ${idx === 0 ? '<span class="pill" style="background:rgba(255,59,31,.16);color:#ff6b55;border-color:rgba(255,59,31,.3);margin-bottom:4px;display:inline-block;">TRENDING</span><br/>' : ''}
           <div style="font:700 14px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
           <div class="sub" style="margin-top:2px;">@ ${escapeHtml(ev.venue)} - ${escapeHtml(ev.time)}</div>
         </div>
         <span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">Vibe ${ev.vibeScore}</span>
       </div>
-      ${ev.pinged.length ? `<div class="sub" style="margin-top:8px;color:var(--gold);">${ev.pinged.slice(0,2).join(' + ')}${ev.pinged.length > 2 ? ` + ${ev.pinged.length - 2}` : ''} pinged this</div>` : ''}
+      <div class="sub" style="margin-top:8px;color:var(--gold);">${ev.rsvpCount} RSVPs this week</div>
     </div>
   `).join('');
 }
 
 function renderPatronCircles() {
-  const el = document.getElementById('patronCirclesFeed');
-  if (!el) return;
-  el.innerHTML = PATRON_DEMO_FRIENDS.map(f => `
-    <div class="card" style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
-      <div class="avatar" style="width:36px;height:36px;flex-shrink:0;">${f.name[0]}</div>
-      <div style="font-size:12px;color:var(--mist);"><b style="color:#fff;">${escapeHtml(f.name)}</b> ${escapeHtml(f.action)}</div>
-    </div>
-  `).join('');
-}
-
-function renderPatronWanting() {
-  const el = document.getElementById('patronWantingFeed');
-  if (!el) return;
-  el.innerHTML = PATRON_DEMO_EVENTS.map(ev => `
-    <div class="card" style="margin-bottom:10px;cursor:pointer;" onclick="openPatronEventDetail('${ev.id}')">
-      <div style="font:700 14px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
-      <div class="sub" style="margin-top:2px;">@ ${escapeHtml(ev.venue)} - ${escapeHtml(ev.time)}</div>
-      <div class="metricline"><span>Early Bird</span><b class="gold">&#163;${ev.priceEarly}</b></div>
-      <div class="metricline"><span>General</span><b>&#163;${ev.priceGeneral}</b></div>
-    </div>
-  `).join('');
+  const membersEl = document.getElementById('patronCircleMembers');
+  if (membersEl) {
+    membersEl.innerHTML = PATRON_DEMO_CIRCLE.map(m => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);">
+        <div class="avatar" style="width:32px;height:32px;flex-shrink:0;">${m.name[0]}</div>
+        <div style="font-size:12px;color:#fff;flex:1;">${escapeHtml(m.name)}</div>
+        ${m.status === 'pending' ? '<span class="pill">Pending</span>' : '<span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">In Circle</span>'}
+      </div>
+    `).join('');
+  }
+  const feedEl = document.getElementById('patronCirclesFeed');
+  if (feedEl) {
+    feedEl.innerHTML = PATRON_DEMO_ACTIVITY.map(f => `
+      <div class="card" style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
+        <div class="avatar" style="width:36px;height:36px;flex-shrink:0;">${f.name[0]}</div>
+        <div style="font-size:12px;color:var(--mist);"><b style="color:#fff;">${escapeHtml(f.name)}</b> ${escapeHtml(f.action)}</div>
+      </div>
+    `).join('');
+  }
 }
 
 function openPatronEventDetail(id) {
   const ev = PATRON_DEMO_EVENTS.find(e => e.id === id);
   if (!ev) return;
   const barsHtml = ev.crowd.map(v => `<div style="flex:1;background:rgba(0,230,118,${0.15 + v/150});height:${v}%;border-radius:3px 3px 0 0;"></div>`).join('');
+  const isFav = patronFavorites.includes(ev.id);
   document.getElementById('sheetContent').innerHTML = `
     <span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO - simulated data</span>
     <div class="h1" style="font-size:20px;margin-top:8px;">${escapeHtml(ev.title)}</div>
@@ -489,7 +542,19 @@ function openPatronEventDetail(id) {
       <div class="metricline"><span>Early Bird</span><b class="gold">&#163;${ev.priceEarly}</b></div>
       <div class="metricline"><span>General Admission</span><b>&#163;${ev.priceGeneral}</b></div>
     </div>
+    <div class="card" style="margin-top:10px;">
+      <div class="eyebrow">Add-Ons (promoter-priced, stackable)</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:var(--mist);">
+        <input type="checkbox" id="patronAddVip" style="width:16px;height:16px;accent-color:var(--gold);"/>
+        VIP — &#163;${ev.vipPrice}
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:var(--mist);">
+        <input type="checkbox" id="patronAddSkip" style="width:16px;height:16px;accent-color:var(--gold);"/>
+        Skip the Line — &#163;${ev.skipLinePrice}
+      </label>
+    </div>
     <button class="btn primary" style="margin-top:12px;" onclick="toast('Ticketing is a vision-demo placeholder - no real payment is connected')">Get Tickets</button>
+    <button class="btn outline" style="margin-top:8px;" onclick="togglePatronFavorite('${ev.id}');closeSheet();openPatronEventDetail('${ev.id}')">${isFav ? '★ Remove Favorite' : '☆ Save as Favorite'}</button>
     <button class="btn outline" style="margin-top:8px;" onclick="window.currentDetailEvent = {title:'${escapeHtml(ev.venue)}', venue_name:'${escapeHtml(ev.venue)}', lat:${ev.lat}, lng:${ev.lng}}; openDirections()">Get Directions</button>
     <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
   `;
