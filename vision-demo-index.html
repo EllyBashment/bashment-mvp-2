@@ -254,9 +254,9 @@ button,input,select,textarea{font:inherit}
   <div class="body">
     <div class="notice" style="margin-bottom:14px;">Needs a real friends/social graph and push notifications — shown here with simulated members.</div>
     <div class="card" style="margin-bottom:14px;">
-      <div class="eyebrow">Your Circle — 3 of 5</div>
+      <div class="eyebrow" id="patronCircleCount">Your Circle — 3 of 5</div>
       <div id="patronCircleMembers"></div>
-      <button class="btn outline" style="margin-top:10px;font-size:11px;" onclick="toast('Invite sent (demo) — real invites need a working social graph')">+ Invite to Circle</button>
+      <button class="btn outline" style="margin-top:10px;font-size:11px;" onclick="inviteToPatronCircle()">+ Invite to Circle</button>
       <p class="sub" style="margin-top:8px;">Circles cap at 5 free — a paid tier could unlock a wider circle later.</p>
     </div>
     <div class="eyebrow">Circle Activity</div>
@@ -453,7 +453,25 @@ const PATRON_DEMO_ACTIVITY = [
 ];
 const patronIsFoundingMember = true; // demo account — shown as an early beta tester
 
-let patronFavorites = ['demo1']; // demo starting state — capped at 3, hard limit (not a preview)
+let patronFavorites = ['demo1']; // demo starting state — capped at 5, hard limit (not a preview)
+let patronRSVPs = {}; // event id -> 'yes' | 'no' | 'maybe' — only "yes" counts toward the visible RSVP/trending count
+
+function setPatronRSVP(id, status) {
+  const ev = PATRON_DEMO_EVENTS.find(e => e.id === id);
+  if (!ev) return;
+  const prevStatus = patronRSVPs[id];
+  if (prevStatus === status) return; // no change, tapping the same option again does nothing
+
+  // Only a "yes" response counts toward the real RSVP/trending number — "maybe" and "no" don't inflate it
+  if (status === 'yes' && prevStatus !== 'yes') ev.rsvpCount += 1;
+  if (status !== 'yes' && prevStatus === 'yes') ev.rsvpCount = Math.max(0, ev.rsvpCount - 1);
+
+  patronRSVPs[id] = status;
+  const labels = { yes: "You're going!", no: 'Marked as not going', maybe: "Marked as maybe" };
+  toast(labels[status]);
+  renderPatronProfile();
+  renderPatronWhatsHot();
+}
 
 function togglePatronFavorite(id) {
   if (patronFavorites.includes(id)) {
@@ -480,7 +498,11 @@ function renderPatronProfile() {
           <div style="font:700 13px var(--fd);color:#fff;">${escapeHtml(ev.title)}</div>
           <div class="sub" style="margin-top:2px;">@ ${escapeHtml(ev.venue)}</div>
         </div>
-        <span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">Vibe ${ev.vibeScore}</span>
+        <div style="text-align:right;">
+          <span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">Vibe ${ev.vibeScore}</span>
+          ${patronRSVPs[ev.id] === 'yes' ? '<span class="pill" style="margin-top:4px;display:block;background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">✓ Going</span>' : ''}
+          ${patronRSVPs[ev.id] === 'maybe' ? '<span class="pill" style="margin-top:4px;display:block;background:rgba(245,166,35,.16);color:var(--gold);border-color:rgba(245,166,35,.35);">? Maybe</span>' : ''}
+        </div>
       </div>
     </div>
   `).join('') : `<div class="sub" style="text-align:center;padding:14px 0;">No favorites yet — tap the star on any event to save it here.</div>`;
@@ -503,13 +525,27 @@ function renderPatronWhatsHot() {
           </div>
           <span class="pill" style="background:rgba(0,230,118,.14);color:var(--green);border-color:rgba(0,230,118,.3);">Vibe ${ev.vibeScore}</span>
         </div>
-        <div class="sub" style="margin-top:8px;color:var(--gold);">${ev.rsvpCount} RSVPs this week</div>
+        <div class="sub" style="margin-top:8px;color:var(--gold);">${ev.rsvpCount} RSVPs this week${patronRSVPs[ev.id] === 'yes' ? ' · <span style="color:var(--green);">✓ You\'re going</span>' : ''}${patronRSVPs[ev.id] === 'maybe' ? ' · <span style="color:var(--gold);">? Maybe</span>' : ''}</div>
       </div>
     </div>
   `).join('');
 }
 
+function inviteToPatronCircle() {
+  if (PATRON_DEMO_CIRCLE.length >= 5) {
+    toast('Your circle is full at 5 — a paid tier could unlock more later');
+    return;
+  }
+  const name = prompt("Who do you want to invite? (demo — real invites need a working social graph)");
+  if (!name || !name.trim()) return;
+  PATRON_DEMO_CIRCLE.push({ name: name.trim(), status: 'pending', founding: false });
+  renderPatronCircles();
+  toast(`Invite sent to ${name.trim()}`);
+}
+
 function renderPatronCircles() {
+  const countEl = document.getElementById('patronCircleCount');
+  if (countEl) countEl.textContent = `Your Circle — ${PATRON_DEMO_CIRCLE.length} of 5`;
   const membersEl = document.getElementById('patronCircleMembers');
   if (membersEl) {
     membersEl.innerHTML = PATRON_DEMO_CIRCLE.map(m => `
@@ -536,6 +572,7 @@ function openPatronEventDetail(id) {
   if (!ev) return;
   const barsHtml = ev.crowd.map(v => `<div style="flex:1;background:rgba(0,230,118,${0.15 + v/150});height:${v}%;border-radius:3px 3px 0 0;"></div>`).join('');
   const isFav = patronFavorites.includes(ev.id);
+  const rsvpStatus = patronRSVPs[ev.id] || null;
   document.getElementById('sheetContent').innerHTML = `
     <span class="pill" style="background:rgba(91,156,255,.14);color:var(--blue);border-color:rgba(91,156,255,.3);">VISION DEMO - simulated data</span>
     <div style="height:120px;border-radius:14px;background:${ev.flyerGradient};margin-top:10px;"></div>
@@ -565,7 +602,15 @@ function openPatronEventDetail(id) {
         Skip the Line — &#163;${ev.skipLinePrice}
       </label>
     </div>
-    <button class="btn primary" style="margin-top:12px;" onclick="toast('Ticketing is a vision-demo placeholder - no real payment is connected')">Get Tickets</button>
+    <div class="card" style="margin-top:12px;">
+      <div class="eyebrow">RSVP</div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="btn ${rsvpStatus === 'yes' ? 'primary' : 'outline'}" style="flex:1;font-size:11px;padding:10px 6px;${rsvpStatus === 'yes' ? 'background:var(--green);' : ''}" onclick="setPatronRSVP('${ev.id}','yes');closeSheet();openPatronEventDetail('${ev.id}')">✓ Yes</button>
+        <button class="btn ${rsvpStatus === 'maybe' ? 'primary' : 'outline'}" style="flex:1;font-size:11px;padding:10px 6px;" onclick="setPatronRSVP('${ev.id}','maybe');closeSheet();openPatronEventDetail('${ev.id}')">? Maybe</button>
+        <button class="btn ${rsvpStatus === 'no' ? 'primary' : 'outline'}" style="flex:1;font-size:11px;padding:10px 6px;${rsvpStatus === 'no' ? 'background:#ff4b3a;' : ''}" onclick="setPatronRSVP('${ev.id}','no');closeSheet();openPatronEventDetail('${ev.id}')">✕ No</button>
+      </div>
+    </div>
+    <button class="btn primary" style="margin-top:8px;" onclick="toast('Ticketing is a vision-demo placeholder - no real payment is connected')">Get Tickets</button>
     <button class="btn outline" style="margin-top:8px;" onclick="togglePatronFavorite('${ev.id}');closeSheet();openPatronEventDetail('${ev.id}')">${isFav ? '★ Remove Favorite' : '☆ Save as Favorite'}</button>
     <button class="btn outline" style="margin-top:8px;" onclick="window.currentDetailEvent = {title:'${escapeHtml(ev.venue)}', venue_name:'${escapeHtml(ev.venue)}', lat:${ev.lat}, lng:${ev.lng}}; openDirections()">Get Directions</button>
     <button class="btn outline" style="margin-top:8px;" onclick="closeSheet()">Close</button>
