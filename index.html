@@ -23,6 +23,7 @@ body{font-family:var(--fb)}
 button,input,select,textarea{font:inherit}
 .shell{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 60% 45% at 50% 100%,#241000,transparent 70%),#080808}
 .device{width:393px;height:852px;background:var(--bg);border:7px solid #151515;border-radius:46px;box-shadow:0 40px 100px #000;overflow:hidden;position:relative}
+@media (max-width:480px){.shell{padding:0}.device{width:100vw;height:100dvh;border:0;border-radius:0;box-shadow:none}.notch{display:none}}
 .notch{position:absolute;z-index:50;top:0;left:50%;transform:translateX(-50%);width:125px;height:30px;background:#000;border-radius:0 0 18px 18px}
 .screen{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg)}
 .screen.active{display:flex}
