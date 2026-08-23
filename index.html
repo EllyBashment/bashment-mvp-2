@@ -87,6 +87,9 @@ button,input,select,textarea{font:inherit}
 .mb-pin{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 10px var(--fd);color:#fff;border:2px solid var(--bg);box-shadow:0 0 14px rgba(245,166,35,.5);}
 .drop{border:1px dashed rgba(245,166,35,.45);border-radius:14px;padding:22px;text-align:center;cursor:pointer}
 .flyer-status{margin-top:12px;padding:12px;border-radius:12px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.15);font-size:11px;}
+.user-location-dot{width:20px;height:20px;border-radius:50%;background:var(--blue);border:3px solid #fff;box-shadow:0 0 0 4px rgba(91,156,255,.3),0 2px 8px rgba(0,0,0,.4);position:relative;}
+.user-location-dot::after{content:'';position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--blue);opacity:.5;animation:userpulse 2s ease-out infinite;}
+@keyframes userpulse{0%{transform:scale(.6);opacity:.6}100%{transform:scale(1.8);opacity:0}}
 </style>
 </head>
 <body>
@@ -223,6 +226,7 @@ let map = null;
 let mapMode = 'explore'; // defaults to Explore — My Events starts empty for new promoters, Explore shows real activity
 let markers = [];
 let userLocation = null; // { lng, lat } once geolocation resolves
+let userLocationMarker = null; // the blue "you are here" marker instance
 let promoterGenres = []; // this promoter's own genre preferences, for match-highlighting in Explore
 let favorites = []; // up to 3 saved venues/events for quick map access, stored on the user's account
 
@@ -343,7 +347,7 @@ function initMap() {
     container: 'realMap',
     style: 'mapbox://styles/mapbox/dark-v11',
     center: [-73.95, 40.72], // NYC default — fallback while detecting location
-    zoom: 10,
+    zoom: 12,
     minZoom: 3,
     maxBounds: [[-82.0, 15.5], [-69.0, 42.5]] // wide enough to cover both Jamaica and NYC metro (beta regions)
   });
@@ -354,10 +358,11 @@ function initMap() {
       pos => {
         const { longitude: lng, latitude: lat } = pos.coords;
         userLocation = { lng, lat };
+        renderUserLocationMarker(lng, lat);
         if (withinBbox(lng, lat, JAMAICA_BBOX)) {
-          map.flyTo({ center: [lng, lat], zoom: 9.5 }); // Jamaica is compact — this shows most of the island
+          map.flyTo({ center: [lng, lat], zoom: 11 }); // Jamaica is compact — still shows a useful surrounding area at this zoom
         } else if (withinBbox(lng, lat, NYC_METRO_BBOX)) {
-          map.flyTo({ center: [lng, lat], zoom: 10.5 }); // borough-level detail
+          map.flyTo({ center: [lng, lat], zoom: 12.5 }); // neighborhood-level detail, close to the user's actual position
         }
         // If they're testing from somewhere outside both regions, keep the NYC default rather than centering on their real (irrelevant) location
       },
@@ -377,6 +382,15 @@ function initMap() {
   // Explore is the default mode now, so trigger an initial venue load right away — geolocation's
   // own flyTo (if it succeeds) will trigger a fresh, more accurate load via moveend anyway.
   if (mapMode === 'explore') loadNearbyVenues();
+}
+
+// The blue "you are here" marker — distinct from event/venue pins (which use amber/green/red),
+// matching the near-universal "current location" convention from Google/Apple Maps and similar apps.
+function renderUserLocationMarker(lng, lat) {
+  if (userLocationMarker) { userLocationMarker.setLngLat([lng, lat]); return; }
+  const el = document.createElement('div');
+  el.className = 'user-location-dot';
+  userLocationMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).addTo(map);
 }
 
 let myOwnEvents = []; // always the signed-in promoter's own events, regardless of map mode
